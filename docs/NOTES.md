@@ -207,7 +207,7 @@ deleted** from the chat (owner: not that sensitive); the code is still stored en
 ### Azure (subscription "Azure subscription 1", all in `rg-bot-colletta`, **italynorth**)
 | Resource | Notes |
 |---|---|
-| Function App `func-bot-colletta-bfdc1a` | Flex Consumption (FC1), Linux, Python 3.11, system identity `2230cfc0-…`. Host `https://func-bot-colletta-bfdc1a.azurewebsites.net` |
+| Function App `func-bot-colletta-bfdc1a` | Flex Consumption (FC1), Linux, Python 3.11, **512 MB instances** (was 2048 until 2026-11-11, see "Cost estimate"), system identity `2230cfc0-…`. Host `https://func-bot-colletta-bfdc1a.azurewebsites.net` |
 | Storage `stbotcollettabfdc1a` | Functions host storage + table `botusers`. Function identity: *Storage Table Data Contributor* |
 | Key Vault `kv-botcolletta-bfdc1a` | RBAC mode. Secrets `telegram-token`, `cred-key`, `webhook-secret`. Function: *Secrets User*; owner: *Secrets Officer* |
 | App Insights `func-bot-colletta-bfdc1a` | logs / exceptions |
@@ -230,6 +230,40 @@ az functionapp restart -g rg-bot-colletta -n func-bot-colletta-bfdc1a
 ```
 `setWebhook` needs `secret_token` = Key Vault `webhook-secret` (read it with `az keyvault secret show`,
 never print it). `deploy.py` ships every root `*.py` (except itself), so new modules need no list to maintain.
+
+### Cost estimate (2026-11-11)
+Scenario: 1,000 users x 100 calls = **100,000 executions** in one month.
+
+Flex Consumption bills executions plus memory x time (GB-s). Free grant per subscription per month: 250,000
+executions and 100,000 GB-s. Rates used: $0.40 per million executions, $0.000026 per GB-s (third-party figures,
+the higher of those found; another source says $0.000016; Microsoft's pricing page did not render the rates).
+
+- Executions: 100,000 < 250,000 free -> $0.
+- Compute = executions x instance GB x seconds per call, minus 100,000 free GB-s, x rate. Seconds per call is
+  **assumed** 1-3 s (fresh site login on every update), not measured.
+
+| Seconds per call | 2048 MB: GB-s -> cost | 512 MB: GB-s -> cost |
+|---|---|---|
+| 1 s | 200,000 -> ~$2.60 | 50,000 -> $0 |
+| 2 s | 400,000 -> ~$7.80 | 100,000 -> $0 |
+| 3 s | 600,000 -> ~$13 | 150,000 -> ~$1.30 |
+
+Real cost should be lower: one instance serves several calls at once. Table Storage, Key Vault and App Insights
+add cents at this volume.
+
+Alternatives considered:
+- **Always-on VM / VPS**: roughly $5-10 a month = $60-120 a year for a bot used one weekend; plus patching, HTTPS.
+- **Azure Container Apps** (scale to zero), 0.25 vCPU / 0.5 GiB: fits the free grant (180,000 vCPU-s, 360,000 GiB-s,
+  2 million requests a month) -> $0, but needs a container image and a rework of the purge timer.
+- **Classic Consumption plan**: bigger free grant (1 million executions, 400,000 GB-s) -> $0, but the Linux
+  version is (as far as recalled, not checked) being retired.
+
+Decision: stay on Flex Consumption and lower the instance memory to 512 MB. Applied 2026-11-11:
+```bash
+az functionapp scale config set -g rg-bot-colletta -n func-bot-colletta-bfdc1a --instance-memory 512   # back: 2048
+```
+Checked after the change: `/api/health` 200, webhook without secret 403. A full Telegram conversation at 512 MB
+was not tried yet.
 
 ### Next steps
 1. ~~Deploy~~ done 2026-11-10 (zip deploy + `setMyCommands` for default and `it`).
