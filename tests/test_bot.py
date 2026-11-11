@@ -789,3 +789,4 @@ def test_logged_commands_before_login_continue_the_login(new_user):
         assert not w.sessions and w.row["state"] == "await_code" and "codice di accesso" in w.last()["text"]
     say("/codice")  # available again
     assert "Scrivi qui il codice" in w.last()["text"]
+    assert "https://www.itud.eu/gncaGestione" in w.last()["text"]  # where to find the code

@@ -231,6 +231,10 @@ def _claim(row: dict) -> bool:
     return True
 
 
+# Appended to every message that asks for the access code
+CODE_HINT = "\nLo trovi su https://www.itud.eu/gncaGestione"
+
+
 def _logged(row: dict) -> bool:
     return bool(row.get("pv_id") and row.get("code_enc"))
 
@@ -334,7 +338,7 @@ def _open_session(chat_id: int, row: dict) -> site.StoreSession | None:
         row["state"] = "await_code"
         _save(row)
         _menu(chat_id, False)
-        send(chat_id, f"{why}\nScrivi qui il codice di accesso di <b>{esc(row.get('pv_label', ''))}</b>.")
+        send(chat_id, f"{why}\nScrivi qui il codice di accesso di <b>{esc(row.get('pv_label', ''))}</b>." + CODE_HINT)
         return None
     try:
         return site.StoreSession(row["prov"], row["city"], row["pv_id"], code)
@@ -345,7 +349,7 @@ def _open_session(chat_id: int, row: dict) -> site.StoreSession | None:
         _save(row)
         _menu(chat_id, False)
         send(chat_id, "❌ Il codice di accesso non funziona più: forse è stato cambiato.\n"
-                      "Scrivi qui il nuovo codice di accesso.")
+                      "Scrivi qui il nuovo codice di accesso." + CODE_HINT)
         return None
 
 
@@ -464,7 +468,7 @@ def _pick_store(chat_id: int, row: dict, pv_id: str) -> None:
     row.update(pv_id=pv_id, pv_label=label, state="await_code")
     store.clear_code(row)
     _save(row)
-    send(chat_id, f"🏪 Punto vendita: <b>{esc(label)}</b>\nOra scrivi qui il <b>codice di accesso</b>.")
+    send(chat_id, f"🏪 Punto vendita: <b>{esc(label)}</b>\nOra scrivi qui il <b>codice di accesso</b>." + CODE_HINT)
 
 
 def cmd_codice(chat_id: int, row: dict) -> None:
@@ -474,7 +478,7 @@ def cmd_codice(chat_id: int, row: dict) -> None:
     _reset_flow(row)
     row["state"] = "await_code"
     _save(row)
-    send(chat_id, f"Scrivi qui il codice di accesso di <b>{esc(row['pv_label'])}</b>.")
+    send(chat_id, f"Scrivi qui il codice di accesso di <b>{esc(row['pv_label'])}</b>." + CODE_HINT)
 
 
 def receive_code(chat_id: int, row: dict, msg: dict) -> None:
@@ -482,7 +486,7 @@ def receive_code(chat_id: int, row: dict, msg: dict) -> None:
     try:
         sess = site.StoreSession(row["prov"], row["city"], row["pv_id"], code)
     except site.LoginFailed:
-        send(chat_id, "❌ Codice di accesso sbagliato. Riscrivilo, oppure scrivi /annulla.")
+        send(chat_id, "❌ Codice di accesso sbagliato. Riscrivilo, oppure scrivi /annulla." + CODE_HINT)
         return
     store.set_code(row, code)
     row["state"] = ""
