@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<title>Arese/EUROSPIN/Via Alfredo Papa 1</title>
+<meta name="description" content="Gestione PV">
+<meta name="keywords" content="Colletta Alimentare">
+<meta name="author" content="C.M.">
+<meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1.0, minimum-scale=0.5, maximum-scale=3.0">
+<link rel='shortcut icon' type='image/x-icon' href='/Immagini/favicon-banco-21.ico' />
+<style>
+body {
+ font-size: 100%;
+}
+</style>
+</head>
+<body class="home">
+	<div id="container">
+	<header>
+   <div id="container">
+    <!-- Inizio header -->
+    <header>
+      <!-- Inizio sezione logo -->
+      <div id="logo" name="logo" style='border:none;width: 96%;color: black;position: fixed;font-size: 1em;'>
+		<table style='width: 100%;max-width: 100%;border: none;color: white;background-color: black;margin-top: 0;'>
+  		<tr>
+   		<td style='width: 10%;border: none;text-align: center;'>
+				<form action="/gnca/mi/arese/" method="post">
+		      <input type="submit" value="U" tabindex="3" 
+		      style='background-color: black;border: none;color: white;padding: none;text-align: center;text-decoration: none;display: inline-block;font-size: 1.5em;margin: none;cursor: pointer;'>
+					<input type="hidden" value="PVUtility" name="NextStep">
+				</form>
+			<p style='font-size: 1em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;'>tility</p>
+		</td>
+   		<td style='width: 80%;border: none;text-align: center;'>
+			<p style='font-size: 0.5em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;'>Arese</p>
+				<form action="/gnca/mi/arese/" method="post">
+		      <input type="submit" value="EUROSPIN" tabindex="3" 
+		      style='background-color: black;border: none;color: white;padding: none;text-align: center;text-decoration: none;display: inline-block;font-size: 1.5em;margin: none;cursor: pointer;'>
+					<input type="hidden" value="PVListAll" name="NextStep">
+				</form>
+			<p style='font-size: 0.5em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;'>Via Alfredo Papa 1 1</p>
+		</td>
+   		<td style='width: 10%;border: none;text-align: center;'>
+				<form action="/gnca/mi/arese/" method="post">
+		      <input type="submit" value="L" tabindex="3" 
+		      style='background-color: black;border: none;color: white;padding: none;text-align: center;text-decoration: none;display: inline-block;font-size: 1.5em;margin: none;cursor: pointer;'>
+					<input type="hidden" value="Logout" name="NextStep">
+				</form>
+			<p style='font-size: 1em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;'>ogout</p>
+		</td>
+		</tr>
+		</table>
+	</div>
+      <!-- Fine sezione logo -->
+    </header>
+    <br><br><br>
+      <div id="logo1" name="logo1" style='width: 100%;color: black;font-size: 1em;'>
+		<form action="/gnca/mi/arese/" method="post">
+		<input type="hidden" value="PVNuovoCamion" name="NextStep">
+		<input type="hidden" value="1" name="OldNrCartoni">
+		<input type="hidden" value="4" name="MaxCartone">
+		<table style='width: 100%;max-width: 100%;border: none;color: black;background-color: rgba(51,102,0,0.8);'>
+				  	<tr>
+ 		  	<td colspan='2'>
+					<p style='font-size: 1.0em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;color: black;'>Vengono consegnati <br><b>
+					<input type="number" name="NrCartoni" 
+	   			min=1 max=1 step=1 size=0 
+	   		value="1" tabindex="1"> </b> cartoni.
+					</p>
+	   		</td>
+		</tr>
+	  	<tr>
+ 		  	<td colspan='2'>
+					<p style='font-size: 1.0em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;color: black;'>
+						Numerati da <b>4</b> a <b>4</b>?					</p>
+ 	   		</td>
+		</tr>
+	  	<tr>
+ 		  	<td colspan='2'>
+					<p style='font-size: 1.0em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;color: black;'>
+						Per un totale di <b>12</b> Kg.?					</p>
+ 	   		</td>
+ 	   		
+		</tr>
+	  	<tr>
+	   		<td colspan='2' style='width: 50%;border: none;text-align: center;font-size: 1.0em;color: white;'>
+	   			Nr Viaggio
+	   			<input type="number" name="IdentificativoCamion" placeholder="NrViaggio"
+	   			min=1 max=220 step=1 size=0 
+	   			value="2"  readonly tabindex="2"
+	   			style="background-color: gray;text-align: right;">
+	   		</td>
+	   	</tr>
+	  	<tr>
+	   		<td colspan='2' style='width: 50%;border: none;text-align: center;font-size: 1.0em;color: white;'>
+	   			Targa veicolo
+	   			<input type="Text" name="Veicolo" placeholder="Targa Veicolo"
+	   			value="" required minlength="7" maxlength="20" tabindex="3">
+	   		</td>
+	   	</tr>
+	   	<tr>
+		   	<td colspan='2' style='width: 50%;border: none;text-align: center;font-size: 1.0em;color: white;'>
+		   		<input type="submit" value="Caricati">
+		   	</td>
+		</tr>
+		<tr><td colspan="2">
+			<table style='width: 100%;max-width: 100%;border: none;color: white;background-color: darkblue;'>
+			<tr>
+				<td  style='width: 10%;text-align: right;font-size: 1.0em;'>Nr</td>
+				<td  style='width: 70%;text-align: center;font-size: 1.0em;'>Prodotto</td>
+				<td  style='width: 20%;text-align: right;font-size: 1.0em;'>Kg.</td>
+			</tr>
+<tr style='background-color: blue;color: white;'><td style='width: 10%;'><p style='font-size: 0.8em;text-align: right;margin-top: 0;margin-bottom: 0;'>1</p></td><td style='width: 70%;'><p style='font-size: 0.8em;text-align: center;margin-top: 0;margin-bottom: 0;'>Tonno in scatola</p></td><td style='width: 20%;'><p style='font-size: 0.8em;text-align: right;margin-top: 0;margin-bottom: 0;'>12,00</p></td></tr>											
+			</table>
+		</td></tr>
+		</table>
+		</form>
+		<form action="/gnca/mi/arese/" method="post">
+		<input type="hidden" value="PVModificaPacco" name="NextStep">
+		<table style='width: 100%;max-width: 100%;border: none;color: white;background-color: rgba(51,22,0,0.8);'>
+	  	<tr>
+ 		  	<td colspan='2'>
+					<p style='font-size: 1.5em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;color: white;'>
+						<br><b>Modifica cartone</b>					</p>
+	   		</td>
+		</tr>
+	  	<tr>
+ 		  	<td >
+				<p style='font-size: 1.0em;border: none;text-align: right;margin-top: 0;margin-bottom: 0;color: white;'>
+						<b>Scegli cartone:</b>				</p>
+ 	   		</td>
+ 		  	<td >
+	   			<select name="NrPaccoModificato" required tabindex="2" SIZE="0"  autofocus>
+					<option value="" selected="true" disabled="true" >Cartone da Modificare</option>
+					<option value="1153">4) Tonno in scatola  12.00 Kg</option>	
+				</select>
+ 	   		</td>
+		</tr>
+	  	<tr>
+ 		  	<td >
+				<p style='font-size: 1.0em;border: none;text-align: right;margin-top: 0;margin-bottom: 0;color: white;'>
+						<b>Nuovo contenuto:</b>				</p>
+ 	   		</td>
+ 		  	<td >
+	   			<select name="contenutoModificato" required tabindex="3" SIZE="0" >
+					<option value="" selected="true" disabled="true" >Tipo cartone</option>
+					<option value="18">Tonno in scatola</option><option value="19">Colazione e merenda</option><option value="20">Conserve di pomodoro e sughi</option><option value="21">Legumi/verdure in scatola</option><option value="22">Olio</option><option value="23">Omogeneizzati</option><option value="24">Alimenti infanzia</option><option value="25">Pasta</option><option value="26">Riso</option><option value="27">Zucchero</option><option value="28">Latte</option><option value="29">Biscotti</option><option value="32">Varie</option>	
+				</select>
+ 	   		</td>
+		</tr>
+	  	<tr>
+ 		  	<td >
+				<p style='font-size: 1.0em;border: none;text-align: right;margin-top: 0;margin-bottom: 0;color: white;'>
+						<b>Nuovo peso (Kg):</b>				</p>
+ 	   		</td>
+ 		  	<td >
+	   			<input type="number" name="kiliModificato" min=1.00 max=22.00 step=0.01 value="" placeholder="Kilogrammi" required tabindex="4">
+ 	   		</td>
+		</tr>
+	  	<tr>
+ 		  	<td colspan='2' style='font-size: 1.0em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;'>
+		   		<input type="submit" value="Modifica" tabindex="5"><br>&nbsp;
+		   	</td>
+		</tr>
+		</table>
+		</form>
+	</div>
+		<table style='width: 100%;max-width: 100%;border: none;color: white;background-color: rgba(51,102,0,0.8);'>
+	  	<tr>
+ 		  	<td style='font-size: 1.0em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;'>
+			<form action="/gnca/mi/arese/" method="post">
+					<input type="hidden" value="PVListTot" name="NextStep">
+		   		<br><input type="submit" value="Visualizza totali" tabindex="6"><br>&nbsp;
+			</form>
+		   	</td>
+ 		  	<td style='font-size: 1.0em;border: none;text-align: center;margin-top: 0;margin-bottom: 0;'>
+			<form action="/gnca/mi/arese/" method="post">
+			<input type="hidden" value="PVDwl" name="NextStep">
+		   		<br><input type="submit" value="Scarica DETTAGLIO" tabindex="7"><br>&nbsp;
+			</form>
+			<form action="/gnca/mi/arese/" method="post">
+						<input type="hidden" value="PVDwlProspetto" name="NextStep">
+		   		<br><input type="submit" value="Scarica PROSPETTO" tabindex="7"><br>&nbsp;
+			</form>
+		   	</td>
+		</tr>
+		</table>
+<p style='background-color: orange;color: black;font-size: 1em;text-align: center;margin-top: 0;margin-bottom: 0;'>000/X000000_0</p>	</header>
+	</div>
+</body></html>

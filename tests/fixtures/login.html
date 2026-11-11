@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<title>Scelta PV</title>
+<meta name="description" content="Scelta PV">
+<meta name="keywords" content="Colletta Alimentare">
+<meta name="author" content="C.M.">
+<meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1.0, minimum-scale=0.5, maximum-scale=3.0">
+<link rel='shortcut icon' type='image/x-icon' href='/Immagini/favicon-banco-21.ico' />
+<style>
+body {
+ font-size: 100%;
+}
+</style>
+</head>
+<body class="home">
+	<div id="container">
+	<header>
+		<div id="logo" name="logo" style="text-align: center;border:none;width: 96%;color: black;position: fixed;font-size: 1em;">
+		<form action="/gnca/mi/arese/" method="post">
+		<table style="width: 100%;max-width: 100%;border: none;color: black;background-color: rgba(51,102,0,0.8);">
+<!--			<tr><td style="width: 50%;text-align: right;">Regione:&nbsp;</td><td style="width: 50%;text-align: left;">&nbsp;</td></tr>
+	scelta dei PV su base della zona			
+			<tr><td style="width: 50%;text-align: right;">Zona:&nbsp;   </td><td style="width: 50%;text-align: left;">&nbsp;</td></tr>
+-->
+<!--	scelta dei PV su base della Provincia/citta			
+-->
+			<tr><td style="width: 50%;text-align: right;">Citta:&nbsp;   </td><td style="width: 50%;text-align: left;">&nbsp;Arese</td></tr>
+
+			<tr><td colspan="2" style="width: 50%;text-align: center;color: red;">
+			</td></tr>
+<tr><td colspan="2" style="width: 50%;text-align: center;color: red;"></td></tr>			
+			<tr><td colspan="2" style="width: 50%;text-align: center;"><b>scegli PV:&nbsp;</b></td></tr><tr>
+				<td colspan="2" style="width: 50%;text-align: center;">
+		   			<select name="NrPV" required="" tabindex="1" size="0">
+						<option value="" selected="selected"></option>
+<option value="493">CONAD/Viale dei Platani 6 1/Arese</option><option value="954">EUROSPIN/Via Alfredo Papa 1 1/Arese</option><option value="1937">LA GRANDE I/Via Giuseppe Eugenio Luraghi 11 1/Arese</option>					</select>
+				</td>
+	 		</tr>
+			<tr><td colspan="2" style="width: 50%;text-align: center;"><b>e indica il codice di accesso:&nbsp;</b></td></tr><tr>
+			  	<td colspan="2" style="width: 50%;text-align: center;">
+			        <input type="text" value="" name="CodiceAccesso" tabindex="2" required="">
+					</td>
+	 		</tr>
+			<tr>
+			<td  colspan="2" style="width: 50%;text-align: center;">
+					<input type="hidden" value="Login" name="NextStep">
+					<input type="submit" value="Conferma">
+				</td>
+	 		</tr>
+		</tbody>
+		</table>
+		</form>
+		</div>
+	</header>
+	</div>
+</body></html>
