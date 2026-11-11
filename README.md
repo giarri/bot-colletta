@@ -1,256 +1,83 @@
-# bot-colletta
+# bot-colletta 🥫
 
-A Telegram bot, hosted on an **Azure Function App (Python)**, that lets volunteers of the
-**Colletta Alimentare** (food drive) register cartons ("cartoni"/"pacchi") for their store (PV,
-*punto vendita*) by chatting with the bot instead of using the web app at
-`https://www.itud.eu/gnca/mi/<città>/`.
+**A Telegram bot that lets food-drive volunteers register donated cartons from their phone, in three taps.**
 
-> Status: **deployed and live** as **@cacartony_bot** (last deploy 2026-11-10, includes `/camion`, site weight
-> limits). Open items in §4 "Next steps".
-
----
-
-## 1. Scope / requirements (from the project owner)
-
-1. Telegram bot, webhook-based, hosted on Azure Functions (Python, owner's Azure subscription).
-2. The bot makes HTTP POST requests to `https://www.itud.eu/gnca/{prov}/{città}/`.
-   The city is **configured by each user** (example/test city: `arese`).
-3. **Every user has their own credentials**, provided at the start of the chat.
-   These turned out to be: **store (PV) + access code** (see §2), not username/password.
-4. Onboarding flow per user: see §3 (paste the city link → pick the store → send the access code).
-   Credential setup also works in groups (the code is then visible there).
-5. Secrets must be stored safely (Key Vault; never in code, README or plain app settings).
-
-### Decisions (owner, 2026-11-10)
-- Commands: `/cartone` (category buttons → kg → submit), `/lista`, `/esci` (+ `/citta`, `/codice`, `/stato`, `/annulla`, `/aiuto`). **Italian UI.**
-- **One volunteer per store**; no allow-list (anyone can use the bot, they need a valid store code anyway).
-- **Provinces are configurable**: `/citta <sigla> <città>`, e.g. `/citta mi arese` → `/gnca/mi/arese/`.
-- Access codes kept **max 7 days**, and they **expire quickly on the site side** → on a failed login the
-  bot drops the code and asks for a new one.
-- Testing against the live site is allowed by the owner.
-- **"Utility" tab = load the cartons on the truck** → bot command `/camion` (aliases `/spedisci`, `/consegna`),
-  always behind a confirmation button. Implemented, not yet tried on the live site (see §2.5, §4).
-
----
-
-## 2. Target site protocol (reverse-engineered, 2026-11-10)
-
-Plain PHP app behind `aruba-proxy`, HTML forms, session cookie `PHPSESSID`.
-**All requests are `application/x-www-form-urlencoded` POSTs to the same URL**,
-the action is selected by the hidden field `NextStep`.
-
-- Base URL: `https://www.itud.eu/gnca/mi/<city>/` — **trailing slash required**
-  (without it: `301` to the *http* URL). `mi` = province of Milan; unknown city → `404`
-  (e.g. `calasetta` → 404).
-- Keep a cookie jar per session; log in again whenever the session is lost
-  (detect: response is the login page again — it contains `name="CodiceAccesso"`).
-
-### 2.1 Login page — `GET /gnca/mi/<city>/`
-Title "Scelta PV". Form:
-```
-<select name="NrPV" required>   <option value="493">CONAD/Viale dei Platani 6 1/Arese …
-<input  name="CodiceAccesso" type="text" required>
-<input  name="NextStep" type="hidden" value="Login">
-```
-Stores for Arese: `493` CONAD Viale dei Platani 6 · `954` EUROSPIN Via Alfredo Papa 1 ·
-`1937` LA GRANDE I Via Giuseppe Eugenio Luraghi 11.
-Parse `<option value="(\d+)">label</option>` from `select[name=NrPV]` to build store buttons.
-
-### 2.2 Login — `POST NrPV=<id>&CodiceAccesso=<code>&NextStep=Login`
-Returns `200` with the store page (§2.3). A test store/code for Arese is in `.env`
-(`TEST_CITY`, `TEST_PV`, `TEST_CODE`). Wrong-code behaviour not yet observed.
-
-### 2.3 Store page (after login)
-Header: `<city>/<chain>/<address>` and three buttons (each its own form):
-- `NextStep=PVUtility` ("U"tility) — opens the Utility page (read-only navigation), see §2.5
-- `NextStep=PVListAll` (store name button) — returns the same store page/list (read-only)
-- `NextStep=Logout` ("L"ogout)
-
-**New carton form** (this is the write action):
-```
-<input  type="hidden" name="NumeroPrevisto" value="4">     ← next carton number (copy from page)
-<select name="contenuto" required>                        ← category id
-<input  type="number" name="kili" min=1.00 max=22.00 step=0.01 required>   ← weight kg
-<input  type="hidden" name="NextStep" value="PVNuovoPacco">
-```
-Categories (`contenuto`): 18 Tonno in scatola · 19 Colazione e merenda ·
-20 Conserve di pomodoro e sughi (shown as "Passata e sughi") · 21 Legumi/verdure in scatola · 22 Olio ·
-23 Omogeneizzati · 24 Alimenti infanzia · 25 Pasta · 26 Riso · 27 Zucchero · 28 Latte ·
-29 Biscotti · 32 Varie. **Parse them from the page, don't hardcode** (they may differ per city).
-Decimal separator shown on the page is a comma (`12,00`); `kili` is sent with a **dot** (`5.50`) — verified.
-
-**Weight limits — two levels, the bot enforces neither (owner decision): it warns and asks to confirm.**
-1. the input's `min`/`max` (1.00–22.00): parsed from the page (`StoreSession.kg_limits()`); browser-side only,
-   what the server does beyond them is untested;
-2. **per-category limits, checked server-side only** and not present in the page. An out-of-range weight is
-   not saved; the site answers with the same form plus
-   `Il peso del cartone di <b>Varie</b> non e' compreso tra i limiti previsti (maggiore di 4.00 e minore di 14.00 ).`,
-   an `Annulla` submit and a `Confermare` submit that re-posts with hidden `MediConfermati=MediConfermati`.
-   `add_carton(cat, kg)` raises `WeightRejected(lo, hi)`; `add_carton(cat, kg, confirm=True)` re-submits with
-   `MediConfermati` (**never tried on the live site**). The bot remembers the range per category
-   (`cat_limits_json`), shows "⚠️ fuori dai limiti" with a "Registra comunque" button (`kg:ok`), or the user
-   types another weight. Only *Varie* = 4–14 is known so far. Fixture: `tests/fixtures/weight_rejected.html`.
-
-**Cartons table** columns: `Cartone` (number) · `kg` · `Contenuto` · `Fatto` (time packed) ·
-`Camion` (time loaded on truck). Example rows seen: `3 | 12,00 | Legumi/verdure in scatola | 17:50 | 17:52`.
-
-### 2.4 ⚠️ Rules for anyone testing against the site
-- It is **live production data** of a real charity drive. The owner allows testing against it, but
-  keep write actions (`PVNuovoPacco`, and especially `PVNuovoCamion` = truck loading, irreversible) to a
-  minimum and tell the owner what you submitted.
-- Verified: GET login page, `Login` (good + wrong code → login page again), `PVListAll`, `PVUtility`
-  (opening the page, with and without pending cartons), `PVNuovoPacco` (success and per-category rejection),
-  **`PVNuovoCamion`** (answers with the store page + "viaggio, con veicolo TEST001, numero 3 con 1 cartoni
-  confermato."; the cartons get a `Camion` time).
-- Test data written on 2026-11-10 to the test store by Claude: **carton n. 5 (Varie 5,50 kg)**, **carton n. 9
-  (Tonno 12,00 kg)**, and **trip n. 3 with plate `TEST001`** loading carton 9. One rejected attempt
-  (Varie 1,50 kg) saved nothing.
-- **Not verified yet**: the `MediConfermati` override (used by the bot's "Registra comunque"), weights outside
-  1–22, which cartons a partial truck load takes.
-- **Never touch `PVTerminata`** ("dichiarare terminata la colletta", with `NrVolontari`): it appears on the
-  Utility page when nothing is pending and closes the store's drive. The bot does not implement it.
-- No brute-forcing or trying the test code on other stores.
-
-### 2.5 Utility page — `POST NextStep=PVUtility` (fixture `tests/fixtures/utility.html`)
-**Truck form** (present when some cartons are not loaded yet):
-```
-<input type="hidden" name="NextStep" value="PVNuovoCamion">
-<input type="hidden" name="OldNrCartoni" value="2">          ← cartons not yet loaded
-<input type="hidden" name="MaxCartone" value="5">            ← highest carton number
-<input type="number" name="NrCartoni" min=1 max=2 value="2">  ← how many are delivered (default: all)
-"Numerati da <b>4</b> a <b>5</b>?"  "Per un totale di <b>17.5</b> Kg.?"
-<input type="number" name="IdentificativoCamion" value="2" readonly>   ← trip number, assigned by the site
-<input type="Text" name="Veicolo" required minlength="7" maxlength="20"> ← vehicle plate (bot: exactly 7 letters/digits, spaces removed)
-<input type="submit" value="Caricati">
-```
-followed by a table Nr / Prodotto / Kg. of the pending cartons grouped by product.
-`StoreSession.truck_form()` parses it, `load_truck(form, plate, count)` submits it and then verifies on
-`PVListAll` that the cartons got a `Camion` time.
-
-**Edit form** `PVModificaPacco` (cartons not yet loaded only), used by `/modifica`:
-```
-<select name="NrPaccoModificato">  <option value="1153">4) Tonno in scatola  12.00 Kg</option>  ← value = site id, label = "<number>) <content> <kg> Kg"
-<select name="contenutoModificato"> same category ids as `contenuto`
-<input type="number" name="kiliModificato" min=1.00 max=22.00>          ← both new content and new weight are required
-```
-`StoreSession.edit_form()` parses it, `edit_carton(id, category, kg)` re-reads it, submits and then verifies on
-`PVListAll` that the carton shows the new content and weight. **Not verified on the live site yet** (added
-2026-11-11): the `PVModificaPacco` answer, and whether it applies the per-category weight limits (the client
-treats a "limiti previsti" answer as `WeightRejected`; there is no "confirm anyway" for edits).
-Bot flow: `/modifica` → carton buttons (`ed:<id>`) → content buttons (`ec:<cat>`, first one keeps the current
-content) → weight typed in `await_edit_kg` or "keep" button (`ek:same`) → submit (no extra confirmation).
-
-Also on the page, **not used by the bot**: `PVListTot` (totals), `PVDwl` / `PVDwlProspetto` (downloads).
-
----
-
-## 3. Architecture (implemented)
+During the **Colletta Alimentare** (Italy's national food drive),
+volunteers in each supermarket weigh every carton of donated food and record it in a web app. The web app is
+form-based and awkward to use on a phone, standing next to a scale with a carton in your hands.
+This bot puts the same workflow in a Telegram chat.
 
 ```
-Telegram ──webhook POST──▶ Azure Function  /api/telegram   (Python v2 model, anonymous,
-                                │                         checks X-Telegram-Bot-Api-Secret-Token)
-                                ├─▶ Table Storage "botusers" (managed identity)
-                                ├─▶ Key Vault refs: TELEGRAM_TOKEN, CRED_KEY (Fernet), WEBHOOK_SECRET
-                                └─▶ itud.eu form POSTs (fresh login per update — Functions are stateless)
-timer 03:00 UTC daily ──▶ purge_expired_codes (drops access codes older than CRED_TTL_DAYS)
+You   /cartone
+Bot   📦 Cartone n. 4
+      Cosa contiene? Tocca un pulsante:
+      [🐟 Tonno in scatola] [☕ Colazione e merenda]
+      [🫙 Passata e sughi]  [🍝 Pasta]  …
+You   (tap 🍝 Pasta)
+Bot   Quanti kg pesa?
+You   12
+Bot   ✅ Cartone n. 4 registrato: 🍝 Pasta, 12,00 kg (ore 17:50)
+```
+
+## What it does
+
+| Command | What happens |
+|---|---|
+| `/cartone` | Register a carton: pick the content, type the weight. |
+| `/lista` | See every carton registered for the store, with totals. |
+| `/modifica` | Fix the content or weight of a carton not yet shipped. |
+| `/camion` | Load the pending cartons on the truck, behind an explicit confirmation. |
+| `/citta`, `/codice`, `/esci` | Guided login (province, city, store, access code) and logout. |
+
+It works in private chats and in **group chats**, where a store's volunteers share one login while each keeps
+their own conversation, so two people can register cartons at the same time without stepping on each other.
+
+## The interesting parts
+
+- **No API to call.** The target web app only speaks HTML forms. I reverse-engineered its protocol and wrote a
+  small client (`site_client.py`) that logs in, parses the pages and posts the forms. Categories, weight limits
+  and store lists are read from the live pages, never hardcoded.
+- **Never trust a write.** After every submission the bot re-reads the store page and checks that the carton,
+  the edit or the truck load is really there before telling the volunteer it worked.
+- **Stateless and serverless.** One Azure Function behind a Telegram webhook. Conversation state lives in
+  Azure Table Storage, so the app scales to zero and costs almost nothing outside the drive weekend.
+- **Secrets handled properly.** The bot token and keys sit in Key Vault and reach the app through managed
+  identity. Volunteers' access codes are encrypted at rest and purged after 7 days by a daily timer. The webhook
+  rejects any call without Telegram's secret token.
+- **Tested offline.** 46 pytest tests run against saved HTML fixtures and fake Telegram and storage layers:
+  no network, no Azure packages, a few seconds.
+- **One-command deploy.** `python3 deploy.py` zips the app, deploys it, checks the health endpoint and updates
+  the Telegram command menu.
+
+## Architecture
+
+```
+Telegram ──webhook──▶ Azure Function (Python)
+                          ├─▶ Table Storage   per-user conversation state, encrypted access codes
+                          ├─▶ Key Vault       bot token, encryption key, webhook secret
+                          └─▶ food-drive site login + form POSTs, one fresh session per update
+daily timer ──▶ purge access codes older than 7 days
 ```
 
 | File | Role |
 |---|---|
-| `function_app.py` | Azure entry points: `telegram_webhook`, `health`, `purge_expired_codes`. Always returns 200 to Telegram. |
-| `bot.py` | Conversation logic + Telegram API helpers, Italian texts, `COMMANDS` (menu set via `setMyCommands`). |
-| `site_client.py` | itud.eu client: `list_stores()`, `StoreSession` (login, `categories`, `kg_limits`, `cartons`, `next_number`, `refresh`, `add_carton`, `truck_form`, `load_truck`). Raises `CityNotFound` / `LoginFailed` / `WeightRejected` / `SiteError`. |
-| `user_store.py` | Per-user row (PK `user`, RK Telegram user id); fields listed in its docstring. Fernet encryption, 7-day TTL. |
-| `tests/` | Offline pytest suite (HTML fixtures, fake Telegram/store; no azure packages needed): `python -m pytest tests -q`. Not deployed. |
-| `.env` | **local secrets, never commit/print**: `TELEGRAM_TOKEN`, `TEST_CITY`, `TEST_PV`, `TEST_CODE`. |
+| `function_app.py` | Azure entry points: webhook, health check, daily purge. |
+| `bot.py` | Conversation logic, Italian texts, Telegram API helpers. |
+| `site_client.py` | Client for the food-drive web app. |
+| `user_store.py` | Per-user rows in Table Storage, with encryption and expiry. |
+| `tests/` | Offline test suite and HTML fixtures. |
 
-Conversation states (`state`): `""` → `await_code` (after store pick / `/codice` / expired code) → `""`;
-`/cartone` → category button (one per site option + cancel) → `await_kg` → submit (out of range: warning +
-`kg:ok` button) → `""`;
-`/camion` → summary → `await_plate` (or "last plate" button) → confirm buttons (`trk:all`, or `trk:part` →
-`await_truck_count` → `trk:ok`) → the truck form is re-read and must be unchanged → submit → `""`.
-Works in private chats and in groups/supergroups. In a private chat everything is per Telegram user. In a group the
-**login is shared** (owner decision, 2026-11-11): one member chooses the store and types the code, then every member
-can work; `/esci` logs the whole group out. The **conversation stays per member** (state, pending carton, truck or
-edit), so two volunteers can register cartons at the same time. Rows: `RowKey=<chat id>` for the group's login,
-`RowKey=<chat id>:<user id>` for each member's conversation (`bot.py`, section "rows").
-In groups the bot ignores ordinary chatter (typed text only while that user has a pending step), ignores unknown
-commands and commands addressed to other bots (`/cmd@OtherBot`), answers as a reply to the user's message, and
-adds `|<user_id>` to the callback data of its buttons: another member's tap gets "Questi pulsanti sono di un altro
-utente." The command menu is set for the whole group (`chat` scope). The access code is typed (and visible) in the group.
-**Group setup:** disable privacy mode in BotFather (`/setprivacy` -> Disable, then remove and re-add the bot to the
-group) or make the bot a group admin; otherwise Telegram delivers only commands, not the typed weight, plate or code.
+**Stack:** Python 3.11 · Azure Functions (Flex Consumption) · Table Storage · Key Vault · Application Insights ·
+Telegram Bot API · pytest.
 
-**Commands by login status (owner decision, 2026-11-11).** "Logged in" = a store is chosen and an access code
-is stored. Before the login (and after `/esci`, or when the code expires / stops working) only `/citta` and
-`/codice` work; `/cartone`, `/lista`, `/camion`, `/modifica`, `/stato`, `/esci` just continue the login (ask the province or
-the code). After the login it is the opposite: `/citta`, `/codice`, a pasted site link and old store buttons
-answer "già collegato … scrivi prima /esci". `/annulla`, `/aiuto`, `/start` always work. The command menu
-follows: `COMMANDS` (default menu, set by `deploy.py`) is the pre-login list; on login the bot sets
-`COMMANDS_LOGGED` for that chat (`setMyCommands` with scope `chat`) and removes it on logout
-(`deleteMyCommands`); `/start` and `/aiuto` re-sync it.
+## Run the tests
 
-**Onboarding (owner decision, 2026-11-11): guided in two steps.** `/citta` (or `/start` for a new user) asks
-the **province sigla** (`await_prov`), then the **city name** (`await_city`, province kept in `pending_prov`)
-→ store buttons (skipped when the city has one store) → access code. City not found → the city is asked again.
-Shortcuts: `/citta mi` skips the first question, `/citta mi arese` (or `mi arese` as the province answer) both.
-Pasting the city's site link (`https://www.itud.eu/gnca/mi/arese/`) still works at any time and is mentioned in
-the province question. Only links on `SITE_BASE` are recognised. The site has no public list of provinces or
-cities (`/gnca/` and `/gnca/mi/` answer 403), so the bot cannot offer one. The access-code message is **no longer
-deleted** from the chat (owner: not that sensitive); the code is still stored encrypted for max 7 days.
-`/stato`, `/lista` and the city message carry a link to the site.
-
----
-
-## 4. Current state (2026-11-10)
-
-### Azure (subscription "Azure subscription 1", all in `rg-bot-colletta`, **italynorth**)
-| Resource | Notes |
-|---|---|
-| Function App `func-bot-colletta-bfdc1a` | Flex Consumption (FC1), Linux, Python 3.11, system identity `2230cfc0-…`. Host `https://func-bot-colletta-bfdc1a.azurewebsites.net` |
-| Storage `stbotcollettabfdc1a` | Functions host storage + table `botusers`. Function identity: *Storage Table Data Contributor* |
-| Key Vault `kv-botcolletta-bfdc1a` | RBAC mode. Secrets `telegram-token`, `cred-key`, `webhook-secret`. Function: *Secrets User*; owner: *Secrets Officer* |
-| App Insights `func-bot-colletta-bfdc1a` | logs / exceptions |
-| App settings | `TELEGRAM_TOKEN`, `CRED_KEY`, `WEBHOOK_SECRET` (= Key Vault refs, all *Resolved*), `TABLES_ENDPOINT`, `SITE_BASE=https://www.itud.eu/gnca`, `CRED_TTL_DAYS=7` |
-| Telegram | bot `@gnca_cartoni_bot` (since 2026-11-11; before: `@cacartony_bot`, webhook removed). Webhook → `/api/telegram` with secret token, `allowed_updates=[message, callback_query]`; command menu set (it + default) |
-
-Verified: `/api/health` 200; forged webhook call 403; simulated `/citta mi arese` update → stores
-fetched and row written to the table (test row removed); site client read-only tests pass.
-
-### Deploy / operate
 ```bash
-python3 deploy.py     # zip → zip-deploy (remote build) → /api/health check → Telegram command menu
-# rotate bot token: put new value in Key Vault (via --file), then REFRESH the Key Vault references and re-run
-# setWebhook. A restart or a deploy is NOT enough: on 2026-11-11 the app kept the old token (every reply failed
-# with Telegram 401 in App Insights) until this call:
-#   az rest --method post --uri "https://management.azure.com/subscriptions/<sub>/resourceGroups/rg-bot-colletta/providers/Microsoft.Web/sites/func-bot-colletta-bfdc1a/config/configreferences/appsettings/refresh?api-version=2023-12-01"
-# Check: a simulated update for an unknown chat must log "400 chat not found", not "401 Unauthorized".
-az keyvault secret set --vault-name kv-botcolletta-bfdc1a -n telegram-token --file <tmpfile>
-az functionapp restart -g rg-bot-colletta -n func-bot-colletta-bfdc1a
+python3 -m venv .venv && .venv/bin/pip install pytest requests
+.venv/bin/python -m pytest -q
 ```
-`setWebhook` needs `secret_token` = Key Vault `webhook-secret` (read it with `az keyvault secret show`,
-never print it). `deploy.py` ships every root `*.py` (except itself), so new modules need no list to maintain.
 
-### Next steps
-1. ~~Deploy~~ done 2026-11-10 (zip deploy + `setMyCommands` for default and `it`).
-2. ~~Try truck loading on the live site~~ done 2026-11-10 with `site_client` (not through the Telegram chat).
-3. Owner should **rotate the bot token** via @BotFather `/revoke` (it was pasted in a chat transcript)
-   and update Key Vault (see above).
-4. Try "Registra comunque" once on the live site (the `MediConfermati` re-submit is untested).
-5. Optional: the other Utility functions (edit carton, totals, downloads).
+## More
 
----
-
-## 5. Environment gotchas
-- Dev machine is **WSL**, but `az` is the **Windows** Azure CLI: output lines end in `\r`
-  (strip before comparing, e.g. `| tr -d '\r'`), and pass **relative paths** (cwd is under
-  `/mnt/c`) rather than `/mnt/...` paths to `az`.
-- **westeurope rejects new resources** on this subscription ("region not accepting new
-  customers") → use **italynorth**.
-- Not installed: Azure Functions Core Tools (`func`), `zip`. Python 3 and Node are available.
-- Corporate network: DNS resolution occasionally fails (seen for `management.azure.com`) — just retry.
-- The Windows `az` has a **default resource group `Microsoft.resourcegroups.test`** in its config —
-  always pass `-g rg-bot-colletta` (e.g. `az keyvault show` without `-g` fails).
-- `az functionapp show` returns all-null fields for this Flex app from this CLI; use
-  `az resource show --resource-type Microsoft.Web/sites ...` instead.
-- A failed `az functionapp create` can leave a half-created site + orphan FC1 plan — delete both before retrying.
+[`docs/NOTES.md`](docs/NOTES.md) holds the working notes: the reverse-engineered site protocol, the design
+decisions taken along the way, the Azure setup and the operational gotchas.

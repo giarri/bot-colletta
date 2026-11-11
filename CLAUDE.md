@@ -1,6 +1,6 @@
 # bot-colletta
 
-Telegram bot for the Colletta Alimentare, running on Azure Functions. See README.md for the protocol and setup.
+Telegram bot for the Colletta Alimentare, running on Azure Functions. See docs/NOTES.md for the protocol and setup.
 
 ## Always deploy
 
