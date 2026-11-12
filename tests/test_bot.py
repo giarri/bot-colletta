@@ -398,6 +398,47 @@ def test_double_submit_registers_one_carton(w, monkeypatch):
     assert w.added[1:] == [("26", 12.0, False)]
 
 
+def test_weight_question_quick_buttons_and_force_reply(w):
+    say("/cartone")
+    tap("cat:25", message_id=80)
+    picked = w.edits()[-1]  # the quick weights are on the message above the question: the question has the ForceReply
+    assert w.buttons(picked) == [[("10 kg", "kg:10:25"), ("12 kg", "kg:12:25"), ("15 kg", "kg:15:25"), ("20 kg", "kg:20:25")],
+                                 [("❌ Annulla", "cat:x")]]
+    assert w.last()["text"].startswith("Quanti kg pesa?")
+    assert w.last()["reply_markup"] == {"force_reply": True, "input_field_placeholder": "es. 12,5"}
+    say("abc")
+    assert "Peso non valido" in w.last()["text"] and w.last()["reply_markup"]["force_reply"] and w.row["pending_msg"] == "80"
+    tap("kg:15:25", message_id=80)
+    assert w.added == [("25", 15.0, False)] and w.row["state"] == "" and "registrato" in w.last()["text"]
+    assert "Peso: <b>15 kg</b>" in w.edits()[-1]["text"] and "reply_markup" not in w.edits()[-1]  # the buttons are gone
+    tap("kg:15:25", message_id=80)  # double tap
+    assert len(w.added) == 1 and "non è più valido" in w.last()["text"]
+
+
+def test_typed_weight_removes_the_quick_buttons_and_old_ones_are_stale(w):
+    say("/cartone")
+    tap("cat:25", message_id=80)
+    say("12,5")
+    assert ("editMessageReplyMarkup", {"chat_id": CHAT, "message_id": "80", "reply_markup": {"inline_keyboard": []}}) in w.tg
+    assert w.added == [("25", 12.5, False)]
+    say("/cartone")
+    tap("cat:18", message_id=81)
+    tap("kg:10:25", message_id=80)  # a quick weight of the previous carton (pasta) while the tuna one is open
+    assert len(w.added) == 1 and "non è più valido" in w.last()["text"] and w.row["state"] == "await_kg"
+    tap("cat:x", message_id=81)
+    assert w.row["pending_msg"] == ""
+
+
+def test_quick_weight_out_of_range_asks_to_confirm(w):
+    w.row["cat_limits_json"] = json.dumps({"25": ["5", "12"]})
+    say("/cartone")
+    tap("cat:25")
+    tap("kg:20:25")
+    assert not w.added and "fuori dai limiti" in w.last()["text"] and w.datas() == ["kg:ok", "cat:x"]
+    tap("kg:ok")
+    assert w.added == [("25", 20.0, True)]
+
+
 # ---------------- /modifica ----------------
 
 def test_modifica_changes_content_and_weight(w):
@@ -408,13 +449,22 @@ def test_modifica_changes_content_and_weight(w):
     assert w.buttons()[0] == [("↩️ Lascia Tonno in scatola", "ec:18")] and w.datas().count("ec:18") == 1
     assert set(w.datas()) == {f"ec:{cid}" for cid, _ in CATS} | {"ed:x"}
     tap("ec:25")
-    assert w.row["state"] == "await_edit_kg" and w.datas() == ["ek:same", "ed:x"]
+    assert w.row["state"] == "await_edit_kg" and w.row["pending_msg"] == "77"
+    assert w.datas(w.edits()[-1]) == ["ek:same", "ek:10", "ek:12", "ek:15", "ek:20", "ed:x"]  # on the message above the question
+    assert w.last()["reply_markup"] == {"force_reply": True, "input_field_placeholder": "es. 12,5"}
     for bad in ("abc", "30"):
         say(bad)
         assert "Peso non valido" in w.last()["text"] and not w.changed
     say("10,5")
     assert w.changed == [("1153", "25", 10.5)] and w.row["state"] == "" and w.row["edit_json"] == ""
     assert "modificato" in w.last()["text"] and "Prima: Tonno in scatola, 12 kg" in w.last()["text"]
+    assert ("editMessageReplyMarkup", {"chat_id": CHAT, "message_id": "77", "reply_markup": {"inline_keyboard": []}}) in w.tg
+    say("/modifica")
+    tap("ed:1153")
+    tap("ec:25")
+    tap("ek:15")  # a quick weight
+    assert w.changed[1:] == [("1153", "25", 15.0)] and w.row["state"] == ""
+    del w.changed[1:]
     say("/modifica")  # same content, new weight: still an edit
     tap("ed:1160")
     tap("ec:25")
@@ -579,6 +629,7 @@ def test_group_flow_and_button_owner(g):
     assert g.last()["chat_id"] == GROUP and g.datas()[0] == f"cat:18|{UID}" and g.datas()[-1] == f"cat:x|{UID}"
     gtap(f"cat:25|{UID}")
     assert mrow()["state"] == "await_kg" and "Pasta" in g.edits()[-1]["text"]
+    assert g.datas(g.edits()[-1])[0] == f"kg:10:25|{UID}" and "reply_markup" not in g.last()  # no ForceReply in a group
     gsay("12,5")
     assert g.added == [("25", 12.5, False)] and mrow()["state"] == "" and "registrato" in g.last()["text"]
     assert set(mrow()) <= bot.FLOW_KEYS | {"PartitionKey", "RowKey"}  # no login data in a member's row
@@ -891,7 +942,9 @@ def test_whatsapp_carton_flow(wa):
     assert len(row["title"]) <= 24 and row["description"] == "🫘 Legumi/verdure in scatola"  # cut title, whole label below
     w.wa.clear()
     wa_tap("cat:25")
-    assert [wa_body(p) for p in w.wa] == ["📦 Contenuto: *🍝 Pasta*", "Quanti kg pesa?"]  # a new message instead of an edit
+    assert [wa_body(p) for p in w.wa] == ["📦 Contenuto: *🍝 Pasta*",  # a new message instead of an edit
+                                          "Quanti kg pesa? Scrivi il numero oppure scegli un peso."]
+    assert wa_ids(w.wa[-1]) == ["kg:10:25", "kg:12:25", "kg:15:25", "kg:20:25", "cat:x"]
     w.wa.clear()
     wa_say("12,5")
     assert w.added == [("25", 12.5, False)] and not w.tg  # nothing goes to Telegram
@@ -900,6 +953,15 @@ def test_whatsapp_carton_flow(wa):
     w.wa.clear()
     wa_tap("cmd:lista", "button_reply")  # a command button works like the typed command
     assert "Arese/CONAD" in wa_body(w.wa[-1]) and "```" in wa_body(w.wa[-1])
+
+
+def test_whatsapp_quick_weight(wa):
+    w = wa
+    wa_say("cartone")
+    wa_tap("cat:25")
+    w.wa.clear()
+    wa_tap("kg:12:25")
+    assert w.added == [("25", 12.0, False)] and len(w.wa) == 1 and "registrato" in wa_body(w.wa[0])
 
 
 def test_whatsapp_out_of_range_weight_has_reply_buttons(wa):

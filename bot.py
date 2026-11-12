@@ -89,6 +89,8 @@ CANCELLED = "Operazione annullata."
 ASK_PROV = ("Scrivi la <b>sigla della provincia</b>, es. <code>MI</code>\n")
 NO_STORE = "Prima scegli città e punto vendita.\n"
 PROV_RE = re.compile(r"[A-Za-z]{2}")
+KG_QUICK = ("10", "12", "15", "20")  # weights offered as one-tap buttons with the weight question
+KG_PLACEHOLDER = "es. 12,5"  # shown in the input field while the bot waits for a weight (Telegram)
 STALE_CARTON = "Questo pulsante non è più valido. Scrivi /cartone per ricominciare."
 STALE_EDIT = "Questo pulsante non è più valido. Scrivi /modifica per ricominciare."
 STALE_TRUCK = "Questo pulsante non è più valido. Scrivi /camion per ricominciare."
@@ -157,7 +159,15 @@ def _wa() -> bool:
     return _channel.get() == "wa"
 
 
-def send(chat_id: int | str, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
+def _markup(buttons: list[list[tuple[str, str]]]) -> dict:
+    ctx = _ctx.get()
+    suffix = f"|{ctx.user_id}" if ctx.group else ""  # in a group the buttons belong to one user
+    return {"inline_keyboard": [[{"text": t, "callback_data": d + suffix} for t, d in row] for row in buttons]}
+
+
+def send(chat_id: int | str, text: str, buttons: list[list[tuple[str, str]]] | None = None, force_reply: str = "") -> None:
+    """`force_reply`: open the user's keyboard on a reply to this message, with that hint in the input field
+    (Telegram private chats, messages without buttons: a message has one markup only)."""
     if _wa():
         if not wa.send(chat_id, text, buttons, WA_COMMANDS):
             wa.send(chat_id, SEND_FAILED)  # never leave the user without an answer
@@ -167,20 +177,21 @@ def send(chat_id: int | str, text: str, buttons: list[list[tuple[str, str]]] | N
     if ctx.group and ctx.reply_to:
         payload["reply_parameters"] = {"message_id": ctx.reply_to, "allow_sending_without_reply": True}
     if buttons:
-        suffix = f"|{ctx.user_id}" if ctx.group else ""  # in a group the buttons belong to one user
-        payload["reply_markup"] = {"inline_keyboard": [[{"text": t, "callback_data": d + suffix} for t, d in row]
-                                                       for row in buttons]}
+        payload["reply_markup"] = _markup(buttons)
+    elif force_reply and not ctx.group:  # in a group it would open the reply for every member
+        payload["reply_markup"] = {"force_reply": True, "input_field_placeholder": force_reply}
     res = tg("sendMessage", **payload)
     if isinstance(res, dict) and res.get("ok") is False and res.get("error_code") != 403:  # 403: the user blocked the bot
         tg("sendMessage", chat_id=chat_id, text=SEND_FAILED,
            **({"reply_parameters": payload["reply_parameters"]} if "reply_parameters" in payload else {}))  # never leave the user without an answer
 
 
-def edit(chat_id: int | str, message_id: int | str, text: str) -> None:
+def edit(chat_id: int | str, message_id: int | str, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
     if _wa():  # WhatsApp cannot edit: the new text goes in a new message
-        wa.send(chat_id, text)
+        wa.send(chat_id, text, buttons)
         return
-    tg("editMessageText", chat_id=chat_id, message_id=message_id, text=text, parse_mode="HTML")
+    tg("editMessageText", chat_id=chat_id, message_id=message_id, text=text, parse_mode="HTML",
+       **({"reply_markup": _markup(buttons)} if buttons else {}))
 
 
 def drop_buttons(chat_id: int | str, message_id: int | str) -> None:
@@ -207,7 +218,7 @@ def _menu(chat_id: int | str, logged: bool) -> None:
 # The handlers see a single merged dict; "_group" (never stored) is the group row as last read or written.
 
 FLOW_KEYS = {"state", "pending_prov", "pending_cat", "pending_kg", "pending_edit", "pending_plate", "pending_count",
-             "truck_json", "edit_json", "cats_json", "kg_min", "kg_max"}
+             "pending_msg", "truck_json", "edit_json", "cats_json", "kg_min", "kg_max"}
 ROW_META = {"PartitionKey", "RowKey", "_etag"}
 
 
@@ -297,7 +308,7 @@ def _cartoni(n, bold: bool = False) -> str:
 def _reset_flow(row: dict) -> None:
     """Forget any conversation in progress (carton or truck)."""
     row.update(state="", pending_cat="", pending_kg="", truck_json="", pending_plate="", pending_count="", pending_prov="",
-               edit_json="", pending_edit="")
+               edit_json="", pending_edit="", pending_msg="")
 
 
 def _dec(value, default) -> Decimal:
@@ -587,11 +598,39 @@ def _warn_kg(chat_id: int, row: dict, kg: Decimal) -> None:
          [[("✅ Registra comunque", "kg:ok")], [(CANCEL, "cat:x")]])
 
 
+def _ask_kg(chat_id: int, row: dict, message_id: int | str, shown: str, question: str,
+            buttons: list[list[tuple[str, str]]]) -> None:
+    """Ask for a weight, typed or tapped. Telegram: the buttons go on the edited message above the question, because
+    the question carries the ForceReply. WhatsApp (no edit, no ForceReply): the buttons go with the question."""
+    if _wa():
+        _save(row)
+        edit(chat_id, message_id, shown)
+        send(chat_id, f"{question} oppure scegli un peso.", buttons)
+        return
+    row["pending_msg"] = str(message_id)
+    _save(row)
+    edit(chat_id, message_id, shown, buttons)
+    send(chat_id, f"{question} oppure tocca un pulsante qui sopra.", force_reply=KG_PLACEHOLDER)
+
+
+def _drop_kg_buttons(chat_id: int, row: dict) -> None:
+    """The weight was typed: the quick weights of the question are no longer needed."""
+    if row.get("pending_msg"):
+        drop_buttons(chat_id, row["pending_msg"])
+        row["pending_msg"] = ""
+
+
 def receive_kg(chat_id: int, row: dict, text: str) -> None:
     kg = _parse_kg(text)
     if kg is None:
-        send(chat_id, "Peso non valido. Scrivi solo il numero dei kg, es. <code>12,5</code>, oppure scrivi /annulla.")
+        send(chat_id, "Peso non valido. Scrivi solo il numero dei kg, es. <code>12,5</code>, oppure scrivi /annulla.",
+             force_reply=KG_PLACEHOLDER)
         return
+    _drop_kg_buttons(chat_id, row)
+    _take_kg(chat_id, row, kg)
+
+
+def _take_kg(chat_id: int, row: dict, kg: Decimal) -> None:
     lo, hi = _kg_limits(row)
     if lo <= kg <= hi:
         _submit_carton(chat_id, row, kg)
@@ -670,7 +709,7 @@ def edit_callback(chat_id: int, row: dict, message_id: int, kind: str, value: st
         return
     edits, cats = _edits(row), json.loads(row.get("cats_json") or "{}")
     carton = edits.get(value if kind == "ed" else row.get("pending_edit") or "")
-    if not carton or (kind == "ec" and value not in cats) or (kind == "ek" and (value != "same" or row.get("pending_cat") not in cats)):
+    if not carton or (kind == "ec" and value not in cats) or (kind == "ek" and (value not in ("same", *KG_QUICK) or row.get("pending_cat") not in cats)):
         send(chat_id, STALE_EDIT)
         return
     nr, content, kg = carton
@@ -684,21 +723,22 @@ def edit_callback(chat_id: int, row: dict, message_id: int, kind: str, value: st
              same + [others[i:i + 2] for i in range(0, len(others), 2)] + [[(CANCEL, "ed:x")]])
     elif kind == "ec":
         row.update(pending_cat=value, state="await_edit_kg")
-        _save(row)
-        edit(chat_id, message_id, f"📦 Contenuto: <b>{_cat_show(cats[value])}</b>")
-        send(chat_id, "Qual è il peso giusto? Scrivi il numero dei kg, es. <code>12,5</code>",
-             [[(f"↩️ Lascia {_kg_show(kg)} kg", "ek:same")], [(CANCEL, "ed:x")]])
+        _ask_kg(chat_id, row, message_id, f"📦 Contenuto: <b>{_cat_show(cats[value])}</b>",
+                "Qual è il peso giusto? Scrivi il numero dei kg, es. <code>12,5</code>,",
+                [[(f"↩️ Lascia {_kg_show(kg)} kg", "ek:same")], [(f"{q} kg", f"ek:{q}") for q in KG_QUICK], [(CANCEL, "ed:x")]])
     else:
         drop_buttons(chat_id, message_id)
-        _submit_edit(chat_id, row, _dec(kg, 0))
+        _submit_edit(chat_id, row, _dec(kg if value == "same" else value, 0))
 
 
 def receive_edit_kg(chat_id: int, row: dict, text: str) -> None:
     kg = _parse_kg(text)
     lo, hi = _dec(row.get("kg_min") or None, site.KG_MIN), _dec(row.get("kg_max") or None, site.KG_MAX)
     if kg is None or not lo <= kg <= hi:
-        send(chat_id, f"Peso non valido: scrivi un numero tra {_num(lo)} e {_num(hi)}, es. <code>12,5</code>, oppure scrivi /annulla.")
+        send(chat_id, f"Peso non valido: scrivi un numero tra {_num(lo)} e {_num(hi)}, es. <code>12,5</code>, oppure scrivi /annulla.",
+             force_reply=KG_PLACEHOLDER)
         return
+    _drop_kg_buttons(chat_id, row)
     _submit_edit(chat_id, row, kg)
 
 
@@ -1056,9 +1096,17 @@ def handle_callback(cq: dict) -> None:
             return
         _reset_flow(row)
         row.update(pending_cat=value, state="await_kg")
-        _save(row)
-        edit(chat_id, msg["message_id"], f"📦 Contenuto: <b>{_cat_show(cats[value])}</b>")
-        send(chat_id, "Quanti kg pesa?")
+        _ask_kg(chat_id, row, msg["message_id"], f"📦 Contenuto: <b>{_cat_show(cats[value])}</b>", "Quanti kg pesa? Scrivi il numero",
+                [[(f"{q} kg", f"kg:{q}:{value}") for q in KG_QUICK], [(CANCEL, "cat:x")]])
+    elif kind == "kg" and value.partition(":")[0] in KG_QUICK:  # a quick weight, valid for the carton it was offered for
+        quick, _, cat = value.partition(":")
+        if row.get("state") != "await_kg" or row.get("pending_cat") != cat:
+            send(chat_id, STALE_CARTON)
+            return
+        row["pending_msg"] = ""
+        if not _wa():  # the buttons go away; on WhatsApp the answer that follows says it all
+            edit(chat_id, msg["message_id"], f"📦 Contenuto: <b>{_cat_show(_cat_label(row))}</b>\n⚖️ Peso: <b>{quick} kg</b>")
+        _take_kg(chat_id, row, Decimal(quick))
     elif kind == "kg":
         kg = _parse_kg(row.get("pending_kg") or "")
         if value != "ok" or row.get("state") != "await_kg" or not row.get("pending_cat") or kg is None:
