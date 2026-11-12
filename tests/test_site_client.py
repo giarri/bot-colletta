@@ -98,6 +98,13 @@ def test_login_and_store_page(site, session):
     assert session.next_number() == "7" and session.kg_limits() == (0.5, 30.0)  # any attribute order
     session.page = "<html><body>niente</body></html>"
     assert session.next_number() is None and session.kg_limits() == (sc.KG_MIN, sc.KG_MAX)
+    assert not session.closed()
+    # as served by the site for a store whose collection was declared finished: a banner, no new-carton form
+    session.page = """<form action="/gnca/mi/rho/" method="post"><div><p style='background-color: silver;'>
+				Hai dichiarato terminata la colletta.<br>Per poter inserire nuovi cartoni
+		    <input type="submit" value=" aprila."><input type="hidden" value="PVTerminata" name="NextStep"></p></div></form>
+		<table><tbody></tbody></table>"""
+    assert session.closed() and session.categories() == [] and session.next_number() is None
     site.pages["Login"] = LOGIN  # bounced back to the login page
     with pytest.raises(sc.LoginFailed):
         sc.StoreSession("mi", "arese", "954", "wrong")

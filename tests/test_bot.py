@@ -128,6 +128,7 @@ class World:
         self.changed = []      # edit_carton calls
         self.edit_error = None
         self.add_error = None
+        self.closed = False
         self.sessions = 0
         self.tg = []           # (method, payload)
 
@@ -173,6 +174,9 @@ def w(monkeypatch):
 
         def categories(self):
             return list(world.cats)
+
+        def closed(self):
+            return world.closed
 
         def next_number(self):
             return "6"
@@ -265,6 +269,29 @@ def new_user(w, monkeypatch):
 
 
 # ---------------- /cartone ----------------
+
+def test_cartone_closed_or_unreadable_points_to_the_site(w):
+    w.cats = []
+    say("/cartone")  # the site shows no contents: no "retry", a link to the site
+    text = w.last()["text"]
+    assert "Non riesco a leggere" in text and "https://www.itud.eu/gnca/mi/arese/" in text and "iprova" not in text
+    assert not w.buttons() and w.row["state"] == ""
+    w.closed = True
+    say("/cartone")  # the store declared the collection finished
+    text = w.last()["text"]
+    assert "terminata" in text and "https://www.itud.eu/gnca/mi/arese/" in text and "Non riesco" not in text
+
+
+def test_crash_message_points_to_the_site(w):
+    update = {"update_id": 1, "message": {"message_id": 5, "text": "/lista", "chat": {"id": CHAT, "type": "private"},
+                                          "from": {"id": UID}}}
+    bot.send_crash(update)
+    text = w.last()["text"]
+    assert "Errore interno" in text and "https://www.itud.eu/gnca/mi/arese/" in text and "iprova" not in text
+    w.row.update(prov="", city="")  # city not chosen yet: nothing to link
+    bot.send_crash(update)
+    assert w.last()["text"] == "⚠️ Errore interno."
+
 
 def test_cartone_flow(w):
     say("/cartone")
@@ -790,3 +817,118 @@ def test_logged_commands_before_login_continue_the_login(new_user):
     say("/codice")  # available again
     assert "Scrivi qui il codice" in w.last()["text"]
     assert "https://www.itud.eu/gncaGestione" in w.last()["text"]  # where to find the code
+
+
+# ---------------- WhatsApp channel ----------------
+
+WA = "wa393331234567"
+
+
+@pytest.fixture
+def wa(w, monkeypatch):
+    w.wa = []  # payloads sent to the Cloud API
+    monkeypatch.setattr(bot.wa, "api", lambda payload: w.wa.append(payload) or True)
+    fake_store.ROWS[WA] = {**fake_store.ROWS.pop(str(UID)), "RowKey": WA}
+    return w
+
+
+def wa_say(text):
+    for u in bot.wa.updates({"entry": [{"changes": [{"field": "messages", "value": {
+            "messaging_product": "whatsapp", "messages": [{"from": WA[2:], "id": f"wamid.{next(_ids)}", "type": "text",
+                                                           "text": {"body": text}}]}}]}]}):
+        bot.handle_update(u, channel="wa")
+
+
+def wa_tap(data, kind="list_reply"):
+    for u in bot.wa.updates({"entry": [{"changes": [{"field": "messages", "value": {
+            "messaging_product": "whatsapp", "messages": [{"from": WA[2:], "id": f"wamid.{next(_ids)}", "type": "interactive",
+                                                           "interactive": {"type": kind, kind: {"id": data, "title": "x"}}}]}}]}]}):
+        bot.handle_update(u, channel="wa")
+
+
+def wa_ids(payload):
+    action = payload["interactive"]["action"]
+    return ([b["reply"]["id"] for b in action["buttons"]] if "buttons" in action
+            else [r["id"] for s in action["sections"] for r in s["rows"]])
+
+
+def wa_body(payload):
+    return payload["text"]["body"] if payload["type"] == "text" else payload["interactive"]["body"]["text"]
+
+
+def test_whatsapp_carton_flow(wa):
+    w = wa
+    wa_say("cartone")  # no slash needed
+    lists = w.wa
+    assert [p["interactive"]["type"] for p in lists] == ["list", "list"] and all(p["to"] == WA[2:] for p in lists)
+    assert [len(wa_ids(p)) for p in lists] == [10, 4]  # 13 categories + cancel: 10 rows per list message
+    assert wa_ids(lists[0])[0] == "cat:18" and wa_ids(lists[1])[-1] == "cat:x"
+    assert "Cartone n. *6*" in wa_body(lists[0]) and "<b>" not in wa_body(lists[0])
+    row = lists[0]["interactive"]["action"]["sections"][0]["rows"][3]
+    assert len(row["title"]) <= 24 and row["description"] == "🫘 Legumi/verdure in scatola"  # cut title, whole label below
+    w.wa.clear()
+    wa_tap("cat:25")
+    assert [wa_body(p) for p in w.wa] == ["📦 Contenuto: *🍝 Pasta*", "Quanti kg pesa?"]  # a new message instead of an edit
+    w.wa.clear()
+    wa_say("12,5")
+    assert w.added == [("25", 12.5, False)] and not w.tg  # nothing goes to Telegram
+    done = w.wa[-1]
+    assert done["interactive"]["type"] == "button" and wa_ids(done) == ["cmd:cartone", "cmd:lista"]
+    w.wa.clear()
+    wa_tap("cmd:lista", "button_reply")  # a command button works like the typed command
+    assert "Arese/CONAD" in wa_body(w.wa[-1]) and "```" in wa_body(w.wa[-1])
+
+
+def test_whatsapp_out_of_range_weight_has_reply_buttons(wa):
+    w = wa
+    wa_say("/cartone")
+    wa_tap("cat:25")
+    wa_say("40")
+    assert not w.added and wa_ids(w.wa[-1]) == ["kg:ok", "cat:x"] and w.wa[-1]["interactive"]["type"] == "button"
+    wa_tap("kg:ok", "button_reply")
+    assert w.added == [("25", 40.0, True)]
+
+
+def test_whatsapp_new_user_is_guided_from_the_first_message(new_user, monkeypatch):
+    w = new_user
+    w.wa = []
+    monkeypatch.setattr(bot.wa, "api", lambda payload: w.wa.append(payload) or True)
+    wa_say("Ciao!")
+    assert "Bot Colletta Alimentare" in wa_body(w.wa[0]) and wa_ids(w.wa[0]) == ["cmd:citta", "cmd:codice", "cmd:annulla"]
+    assert "sigla della provincia" in wa_body(w.wa[-1]) and fake_store.ROWS[WA]["state"] == "await_prov"
+    wa_say("mi")
+    wa_say("Arese")
+    assert w.asked == [("mi", "Arese")] and wa_ids(w.wa[-1]) == ["pv:493", "pv:954"]
+    assert w.wa[-1]["interactive"]["type"] == "list"  # store names are too long for reply buttons
+    assert "Apri il sito: https://www.itud.eu/gnca/mi/arese/" in wa_body(w.wa[-1])
+    wa_tap("pv:954")
+    assert fake_store.ROWS[WA]["pv_id"] == "954" and fake_store.ROWS[WA]["state"] == "await_code"
+    assert str(UID) not in fake_store.ROWS and not w.tg
+
+
+def test_whatsapp_truck_needs_the_confirmation_button(wa):
+    w = wa
+    wa_say("camion")
+    assert fake_store.ROWS[WA]["state"] == "await_plate" and wa_ids(w.wa[-1]) == ["trk:no"]
+    wa_say("ab 123 cd")
+    assert not w.loads and wa_ids(w.wa[-1]) == ["trk:all", "trk:part", "trk:no"]
+    wa_tap("trk:all", "button_reply")
+    assert [(plate, count) for _, plate, count in w.loads] == [("AB123CD", None)]
+    wa_tap("trk:all", "button_reply")  # the old button is still there: tapping it again loads nothing
+    assert len(w.loads) == 1 and "non è più valido" in wa_body(w.wa[-1])
+
+
+def test_whatsapp_send_failure_tells_the_user(wa, monkeypatch):
+    w = wa
+    monkeypatch.setattr(bot.wa, "api", lambda payload: w.wa.append(payload) or payload["type"] == "text")
+    wa_say("cartone")
+    assert w.wa[-1]["type"] == "text" and "Non sono riuscito" in wa_body(w.wa[-1])
+
+
+def test_telegram_is_unchanged_after_a_whatsapp_update(wa):
+    w = wa
+    wa_say("lista")
+    fake_store.ROWS[str(UID)] = {**fake_store.ROWS[WA], "RowKey": str(UID)}
+    n = len(w.wa)
+    say("/lista")
+    assert len(w.wa) == n and "<b>Arese/CONAD</b>" in w.last()["text"]

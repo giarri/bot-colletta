@@ -83,6 +83,9 @@ class EditForm:
 LIMITS_RE = re.compile(r"(?is)limiti\s+previsti.{0,40}?maggiore\s+di\s*([\d.,]+)\s*e\s+minore\s+di\s*([\d.,]+)")
 
 
+# the store page of a collection declared finished
+CLOSED_RE = re.compile(r"(?i)dichiarat\w+\s+terminata\s+la\s+colletta")
+
 # Category labels we show under a different name than the site's. Applied to every text read from the site
 # (select options, carton rows, truck summary), so the labels still compare equal to each other.
 RENAMES = [(re.compile(r"(?i)conserve di pomodoro e sughi"), "Passata e sughi")]
@@ -189,6 +192,11 @@ class StoreSession:
 
     def categories(self) -> list[tuple[str, str]]:
         return _options(self.page, "contenuto")
+
+    def closed(self) -> bool:
+        """True when the store declared its collection finished ("Hai dichiarato terminata la colletta"): the store
+        page then has no new-carton form. Only the site can reopen it (NextStep=PVTerminata): the bot never does."""
+        return bool(CLOSED_RE.search(_text(self.page)))
 
     def next_number(self) -> str | None:
         value = _inputs(self.page).get("NumeroPrevisto", {}).get("value", "").strip()

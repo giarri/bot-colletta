@@ -1,4 +1,8 @@
-"""Conversation logic (Italian UI). Entry point: handle_update(update_dict)."""
+"""Conversation logic (Italian UI). Entry point: handle_update(update_dict, channel).
+
+Written for Telegram updates; WhatsApp ones arrive already translated to the same shape (see whatsapp.py) and
+the helpers under "Telegram API" send through the channel of the current update.
+"""
 
 import contextvars
 import dataclasses
@@ -15,6 +19,7 @@ import requests
 
 import site_client as site
 import user_store as store
+import whatsapp as wa
 
 TG_TIMEOUT = 15
 PLATE_LEN = 7  # characters of a vehicle plate (spaces removed)
@@ -76,6 +81,8 @@ LOGGED_ONLY = {"cartone": "cartone", "lista": "lista", "camion": "camion", "sped
 LOGIN_ONLY = {"citta": "citta", "città": "citta", "city": "citta", "codice": "codice"}
 
 KNOWN_COMMANDS = {"start", "aiuto", "help", "annulla", *LOGGED_ONLY, *LOGIN_ONLY}
+# WhatsApp: the commands that get a button when a message mentions them (see whatsapp.send)
+WA_COMMANDS = dict(COMMANDS + COMMANDS_LOGGED)
 
 CANCEL = "❌ Annulla"
 CANCELLED = "Operazione annullata."
@@ -86,6 +93,8 @@ STALE_CARTON = "Questo pulsante non è più valido. Scrivi /cartone per ricominc
 STALE_EDIT = "Questo pulsante non è più valido. Scrivi /modifica per ricominciare."
 STALE_TRUCK = "Questo pulsante non è più valido. Scrivi /camion per ricominciare."
 SEND_FAILED = "⚠️ Non sono riuscito a mostrarti la risposta. Riprova, oppure scrivi /annulla e ricomincia."
+CLOSED = ("🔒 La colletta di questo punto vendita è stata dichiarata <b>terminata</b>: non si possono registrare nuovi cartoni.\n"
+          "Per riaprirla, apri il sito e tocca «aprila»:\n")
 LOST_TRUCK = "Non trovo più i cartoni da caricare. Scrivi /camion per ricominciare."  # typed text, no button involved
 
 # Emoji for a category, chosen by keyword at the start of a word of its label (first match wins).
@@ -117,6 +126,7 @@ class Ctx:
 
 
 _ctx: contextvars.ContextVar[Ctx] = contextvars.ContextVar("ctx", default=Ctx())
+_channel: contextvars.ContextVar[str] = contextvars.ContextVar("channel", default="tg")  # "tg" or "wa", set by handle_update
 NOT_YOURS = "Questi pulsanti sono di un altro utente."
 
 
@@ -142,7 +152,15 @@ def _bot_username() -> str | None:
         return None  # getMe failed: the caller accepts the command
 
 
-def send(chat_id: int, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
+def _wa() -> bool:
+    return _channel.get() == "wa"
+
+
+def send(chat_id: int | str, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
+    if _wa():
+        if not wa.send(chat_id, text, buttons, WA_COMMANDS):
+            wa.send(chat_id, SEND_FAILED)  # never leave the user without an answer
+        return
     ctx = _ctx.get()
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}}
     if ctx.group and ctx.reply_to:
@@ -157,16 +175,23 @@ def send(chat_id: int, text: str, buttons: list[list[tuple[str, str]]] | None = 
            **({"reply_parameters": payload["reply_parameters"]} if "reply_parameters" in payload else {}))  # never leave the user without an answer
 
 
-def edit(chat_id: int, message_id: int, text: str) -> None:
+def edit(chat_id: int | str, message_id: int | str, text: str) -> None:
+    if _wa():  # WhatsApp cannot edit: the new text goes in a new message
+        wa.send(chat_id, text)
+        return
     tg("editMessageText", chat_id=chat_id, message_id=message_id, text=text, parse_mode="HTML")
 
 
-def drop_buttons(chat_id: int, message_id: int) -> None:
+def drop_buttons(chat_id: int | str, message_id: int | str) -> None:
+    if _wa():
+        return  # not possible on WhatsApp: a stale button is answered when tapped
     tg("editMessageReplyMarkup", chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": []})
 
 
-def _menu(chat_id: int, logged: bool) -> None:
+def _menu(chat_id: int | str, logged: bool) -> None:
     """Show in this chat only the commands that work now (one Telegram call, done only when the status changes)."""
+    if _wa():
+        return  # no command menu on WhatsApp: the messages carry buttons for the commands they mention
     scope = {"type": "chat", "chat_id": chat_id}  # also in a group: the login is shared, so is the menu
     if logged:
         tg("setMyCommands", scope=scope, commands=[{"command": c, "description": d} for c, d in COMMANDS_LOGGED])
@@ -495,7 +520,7 @@ def receive_code(chat_id: int, row: dict, msg: dict) -> None:
     n = len(sess.cartons())
     send(chat_id, f"✅ Codice di accesso corretto: <b>{esc(sess.title())}</b>\n"
                   f"Cartoni già registrati: {n}\n\n"
-                  "Scrivi /cartone per registrare un cartone.")
+                  + (CLOSED + _site_link(row) if sess.closed() else "Scrivi /cartone per registrare un cartone."))
 
 
 def _save_kg_limits(row: dict, sess: site.StoreSession) -> None:
@@ -509,7 +534,10 @@ def cmd_cartone(chat_id: int, row: dict) -> None:
         return
     cats = sess.categories()
     if not cats:
-        send(chat_id, "⚠️ Non riesco a leggere dal sito l'elenco dei contenuti. Riprova tra qualche minuto con /cartone.")
+        if sess.closed():
+            send(chat_id, CLOSED + _site_link(row))
+        else:
+            send(chat_id, "⚠️ Non riesco a leggere dal sito l'elenco dei contenuti. Controlla direttamente sul sito:\n" + _site_link(row))
         return
     _reset_flow(row)
     _save_kg_limits(row, sess)
@@ -566,8 +594,8 @@ def _submit_carton(chat_id: int, row: dict, kg: Decimal, confirm: bool = False) 
         return
     except (site.SiteError, requests.RequestException) as e:  # e.g. a timeout: the carton may be there or not
         logging.exception("add_carton failed")
-        send(chat_id, f"⚠️ Il sito non ha confermato il cartone. Scrivi /lista per controllare se è stato registrato "
-                      f"prima di riprovare con /cartone.\n<i>{esc(str(e)[:300])}</i>")
+        send(chat_id, f"⚠️ Il sito non ha confermato il cartone. Scrivi /lista per controllare se è stato registrato, "
+                      f"oppure guarda sul sito:\n{_site_link(row)}\n<i>{esc(str(e)[:300])}</i>")
         return
     send(chat_id, f"✅ Cartone n. <b>{esc(c.number)}</b> registrato: {_cat_show(c.content)}, {esc(c.kg)} kg (ore {esc(c.done)})\n"
                   "Scrivi /cartone per il prossimo, /lista per vederli tutti.")
@@ -678,8 +706,8 @@ def _submit_edit(chat_id: int, row: dict, kg: Decimal) -> None:
         return
     except (site.SiteError, requests.RequestException) as e:
         logging.exception("edit_carton failed")
-        send(chat_id, f"⚠️ Il sito non ha confermato la modifica. Scrivi /lista per controllare il cartone n. {esc(carton[0])}.\n"
-                      f"<i>{esc(str(e)[:300])}</i>")
+        send(chat_id, f"⚠️ Il sito non ha confermato la modifica. Scrivi /lista per controllare il cartone n. {esc(carton[0])}, "
+                      f"oppure guarda sul sito:\n{_site_link(row)}\n<i>{esc(str(e)[:300])}</i>")
         return
     send(chat_id, f"✏️ Cartone n. <b>{esc(c.number)}</b> modificato: {_cat_show(c.content)}, {esc(c.kg)} kg\n"
                   f"<i>Prima: {esc(carton[1])}, {_kg_show(carton[2])} kg</i>")
@@ -818,8 +846,8 @@ def _truck_submit(chat_id: int, row: dict, message_id: int, saved: dict, plate: 
     except (site.SiteError, requests.RequestException) as e:  # e.g. a timeout: the load may be done or not
         logging.exception("load_truck failed")
         edit(chat_id, message_id, "⚠️ Carico non confermato.")
-        send(chat_id, f"⚠️ Il sito non ha confermato il carico. Scrivi /lista per controllare se i cartoni sono sul camion.\n"
-                      f"<i>{esc(str(e)[:300])}</i>")
+        send(chat_id, f"⚠️ Il sito non ha confermato il carico. Scrivi /lista per controllare se i cartoni sono sul camion, "
+                      f"oppure guarda sul sito:\n{_site_link(row)}\n<i>{esc(str(e)[:300])}</i>")
         return
     row["last_plate"] = plate
     _save(row)
@@ -872,6 +900,13 @@ def handle_message(msg: dict) -> None:
     if not text or not user_id:
         return
     row = _load(user_id, chat_id, group)
+
+    if _wa() and not text.startswith("/"):  # nobody types a slash on WhatsApp: a command is its bare word
+        word = text.split()[0].lower()
+        if word in KNOWN_COMMANDS and (len(text.split()) == 1 or LOGIN_ONLY.get(word) == "citta"):
+            text = "/" + text
+        elif not row.get("prov") and not row.get("state") and not SITE_URL_RE.search(text):
+            text = "/start"  # first message of a new user, whatever it says
 
     if text.startswith("/"):
         cmd, _, args = text.partition(" ")
@@ -960,10 +995,13 @@ def handle_callback(cq: dict) -> None:
     data, _, owner = (cq.get("data") or "").rpartition("|")
     if not owner.isdigit():  # no owner suffix (private chats, old messages)
         data, owner = cq.get("data") or "", ""
-    if owner and int(owner) != cq["from"]["id"]:
+    if _wa():
+        pass  # nothing to acknowledge, and no groups
+    elif owner and int(owner) != cq["from"]["id"]:
         tg("answerCallbackQuery", callback_query_id=cq["id"], text=NOT_YOURS)
         return
-    tg("answerCallbackQuery", callback_query_id=cq["id"])
+    else:
+        tg("answerCallbackQuery", callback_query_id=cq["id"])
     chat_id = msg.get("chat", {}).get("id")
     if not chat_id:
         return
@@ -1009,7 +1047,26 @@ def handle_callback(cq: dict) -> None:
         truck_callback(chat_id, row, msg["message_id"], value)
 
 
-def handle_update(update: dict) -> None:
+def send_crash(update: dict, channel: str = "tg") -> None:
+    """Tell the user that handling this update failed, pointing to the site (when the city is known) instead of a retry."""
+    _channel.set(channel)
+    msg = update.get("message") or (update.get("callback_query") or {}).get("message") or {}
+    chat = msg.get("chat") or {}
+    if not chat.get("id"):
+        return
+    user_id = ((update.get("callback_query") or update.get("message") or {}).get("from") or {}).get("id", 0)
+    text = "⚠️ Errore interno."
+    try:
+        row = _load(user_id, chat["id"], _set_ctx(chat, user_id, msg.get("message_id"))) if user_id else {}
+        if row.get("prov") and row.get("city"):
+            text += " Puoi continuare direttamente sul sito:\n" + _site_link(row)
+    except Exception:
+        logging.exception("send_crash: no site link")
+    send(chat["id"], text)
+
+
+def handle_update(update: dict, channel: str = "tg") -> None:
+    _channel.set(channel)  # always set: nothing leaks from the previous update
     if "message" in update:
         handle_message(update["message"])
     elif "callback_query" in update:

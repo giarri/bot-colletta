@@ -44,7 +44,7 @@ their own conversation, so two people can register cartons at the same time with
 - **Secrets handled properly.** The bot token and keys sit in Key Vault and reach the app through managed
   identity. Volunteers' access codes are encrypted at rest and purged after 7 days by a daily timer. The webhook
   rejects any call without Telegram's secret token.
-- **Tested offline.** 46 pytest tests run against saved HTML fixtures and fake Telegram and storage layers:
+- **Tested offline.** 58 pytest tests run against saved HTML fixtures and fake Telegram and storage layers:
   no network, no Azure packages, a few seconds.
 - **One-command deploy.** `python3 deploy.py` zips the app, deploys it, checks the health endpoint and updates
   the Telegram command menu.
@@ -63,6 +63,7 @@ daily timer ──▶ purge access codes older than 7 days
 |---|---|
 | `function_app.py` | Azure entry points: webhook, health check, daily purge. |
 | `bot.py` | Conversation logic, Italian texts, Telegram API helpers. |
+| `whatsapp.py` | WhatsApp channel (Meta Cloud API): same conversation, buttons become reply buttons and lists. Not live yet. |
 | `site_client.py` | Client for the food-drive web app. |
 | `user_store.py` | Per-user rows in Table Storage, with encryption and expiry. |
 | `tests/` | Offline test suite and HTML fixtures. |

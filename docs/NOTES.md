@@ -1,35 +1,25 @@
 # bot-colletta
 
-A Telegram bot, hosted on an **Azure Function App (Python)**, that lets volunteers of the
-**Colletta Alimentare** (food drive) register cartons ("cartoni"/"pacchi") for their store (PV,
-*punto vendita*) by chatting with the bot instead of using the web app at
-`https://www.itud.eu/gnca/mi/<città>/`.
+Working notes for the bot: the reverse-engineered site protocol, the owner's decisions, the Azure setup and the
+operational gotchas. What the bot is and what it does: see the [README](../README.md).
 
-> Status: **deployed and live** as **@cacartony_bot** (last deploy 2026-11-10, includes `/camion`, site weight
-> limits). Open items in §4 "Next steps".
+> Status: **deployed and live** as **@gnca_cartoni_bot**. Open items in §4 "Open items".
 
 ---
 
-## 1. Scope / requirements (from the project owner)
+## 1. Scope and owner decisions
 
-1. Telegram bot, webhook-based, hosted on Azure Functions (Python, owner's Azure subscription).
-2. The bot makes HTTP POST requests to `https://www.itud.eu/gnca/{prov}/{città}/`.
-   The city is **configured by each user** (example/test city: `arese`).
-3. **Every user has their own credentials**, provided at the start of the chat.
-   These turned out to be: **store (PV) + access code** (see §2), not username/password.
-4. Onboarding flow per user: see §3 (paste the city link → pick the store → send the access code).
-   Credential setup also works in groups (the code is then visible there).
-5. Secrets must be stored safely (Key Vault; never in code, README or plain app settings).
-
-### Decisions (owner, 2026-11-10)
-- Commands: `/cartone` (category buttons → kg → submit), `/lista`, `/esci` (+ `/citta`, `/codice`, `/stato`, `/annulla`, `/aiuto`). **Italian UI.**
-- **One volunteer per store**; no allow-list (anyone can use the bot, they need a valid store code anyway).
-- **Provinces are configurable**: `/citta <sigla> <città>`, e.g. `/citta mi arese` → `/gnca/mi/arese/`.
-- Access codes kept **max 7 days**, and they **expire quickly on the site side** → on a failed login the
+- Telegram bot, webhook-based, on Azure Functions (Python) in the owner's Azure subscription. It drives the web
+  app at `https://www.itud.eu/gnca/<prov>/<città>/` with form POSTs (§2).
+- **Every user has their own credentials: store (PV, *punto vendita*) + access code**, not username/password.
+  Province and city are configured by each user (test city: `mi` / `arese`). Onboarding: §3.
+- Secrets live in Key Vault; never in code, README or plain app settings.
+- **Italian UI.** No allow-list: anyone can use the bot, they need a valid store code anyway.
+- Access codes are kept **max 7 days**, and they **expire quickly on the site side** → on a failed login the
   bot drops the code and asks for a new one.
-- Testing against the live site is allowed by the owner.
-- **"Utility" tab = load the cartons on the truck** → bot command `/camion` (aliases `/spedisci`, `/consegna`),
-  always behind a confirmation button. Implemented, not yet tried on the live site (see §2.5, §4).
+- Testing against the live site is allowed by the owner, within the rules in §2.4.
+- **"Utility" tab = load the cartons on the truck** → `/camion` (aliases `/spedisci`, `/consegna`), always behind
+  a confirmation button.
 
 ---
 
@@ -58,7 +48,7 @@ Parse `<option value="(\d+)">label</option>` from `select[name=NrPV]` to build s
 
 ### 2.2 Login — `POST NrPV=<id>&CodiceAccesso=<code>&NextStep=Login`
 Returns `200` with the store page (§2.3). A test store/code for Arese is in `.env`
-(`TEST_CITY`, `TEST_PV`, `TEST_CODE`). Wrong-code behaviour not yet observed.
+(`TEST_CITY`, `TEST_PV`, `TEST_CODE`). A wrong code answers with the login page again.
 
 ### 2.3 Store page (after login)
 Header: `<city>/<chain>/<address>` and three buttons (each its own form):
@@ -155,14 +145,9 @@ Telegram ──webhook POST──▶ Azure Function  /api/telegram   (Python v2 
 timer 03:00 UTC daily ──▶ purge_expired_codes (drops access codes older than CRED_TTL_DAYS)
 ```
 
-| File | Role |
-|---|---|
-| `function_app.py` | Azure entry points: `telegram_webhook`, `health`, `purge_expired_codes`. Always returns 200 to Telegram. |
-| `bot.py` | Conversation logic + Telegram API helpers, Italian texts, `COMMANDS` (menu set via `setMyCommands`). |
-| `site_client.py` | itud.eu client: `list_stores()`, `StoreSession` (login, `categories`, `kg_limits`, `cartons`, `next_number`, `refresh`, `add_carton`, `truck_form`, `load_truck`). Raises `CityNotFound` / `LoginFailed` / `WeightRejected` / `SiteError`. |
-| `user_store.py` | Per-user row (PK `user`, RK Telegram user id); fields listed in its docstring. Fernet encryption, 7-day TTL. |
-| `tests/` | Offline pytest suite (HTML fixtures, fake Telegram/store; no azure packages needed): `python -m pytest tests -q`. Not deployed. |
-| `.env` | **local secrets, never commit/print**: `TELEGRAM_TOKEN`, `TEST_CITY`, `TEST_PV`, `TEST_CODE`. |
+Files and their roles: see the README. Not in git: `.env`, **local secrets, never commit/print**
+(`TELEGRAM_TOKEN`, `TEST_CITY`, `TEST_PV`, `TEST_CODE`). The webhook always returns 200 to Telegram. Errors raised
+by `site_client.py`: `CityNotFound` / `LoginFailed` / `WeightRejected` / `SiteError`.
 
 Conversation states (`state`): `""` → `await_code` (after store pick / `/codice` / expired code) → `""`;
 `/cartone` → category button (one per site option + cancel) → `await_kg` → submit (out of range: warning +
@@ -200,9 +185,36 @@ cities (`/gnca/` and `/gnca/mi/` answer 403), so the bot cannot offer one. The a
 deleted** from the chat (owner: not that sensitive); the code is still stored encrypted for max 7 days.
 `/stato`, `/lista` and the city message carry a link to the site.
 
+### WhatsApp channel (added 2026-11-11, **not live yet**: see "Open items")
+
+Same conversation, second channel; **Telegram behaviour is unchanged** (owner requirement). `whatsapp.py` translates
+both ways and `bot.py` picks the channel per update (`handle_update(update, channel="wa")`, ContextVar `_channel`):
+
+```
+WhatsApp ──webhook──▶ /api/whatsapp   GET  = registration (hub.verify_token must equal WA_VERIFY_TOKEN)
+                                      POST = messages, X-Hub-Signature-256 checked with WA_APP_SECRET
+                          └─▶ whatsapp.updates() → Telegram-shaped updates → bot.handle_update(…, "wa")
+bot.send / edit ──▶ whatsapp.send() ──▶ POST graph.facebook.com/<ver>/<WA_PHONE_ID>/messages (Bearer WA_TOKEN)
+```
+
+- **User key**: `RowKey = "wa<phone number>"` (so the table now holds phone numbers). 1:1 chats only, no groups.
+- **Text**: HTML → WhatsApp markup (`*bold*`, `_italic_`, `` `code` ``, ``` blocks, links as "text: url").
+- **Buttons**: up to 3 options with titles of max 20 characters → reply buttons; otherwise list messages of 10 rows
+  each (13 categories + cancel = 2 messages). A row title is cut at 24 characters, the whole label goes in the
+  description. A text longer than 1024 characters is sent first, its last line carries the buttons.
+- **Commands**: the bare word works (`cartone`, `lista`, …; `/cartone` too). A message without buttons gets one
+  button per `/command` it mentions (id `cmd:<name>`), more than 3 become a list with the descriptions: that
+  replaces Telegram's tappable commands and command menu.
+- **New user**: the first message, whatever it says, works like `/start`.
+- **No edits**: where Telegram edits a message, WhatsApp gets a new one; buttons cannot be removed, a stale one
+  is answered with "non è più valido" when tapped.
+- The limits above (3 buttons, 20 / 24 / 72 characters, 10 rows, 1024 / 4096 characters) are **from memory of the
+  Cloud API docs, not verified against the live API**: no message has been sent through WhatsApp yet.
+- Meta app id `1930203954625442`; Graph API version `v24.0` (override with `WA_API_VERSION`).
+
 ---
 
-## 4. Current state (2026-11-10)
+## 4. Current state (2026-11-11)
 
 ### Azure (subscription "Azure subscription 1", all in `rg-bot-colletta`, **italynorth**)
 | Resource | Notes |
@@ -213,9 +225,6 @@ deleted** from the chat (owner: not that sensitive); the code is still stored en
 | App Insights `func-bot-colletta-bfdc1a` | logs / exceptions |
 | App settings | `TELEGRAM_TOKEN`, `CRED_KEY`, `WEBHOOK_SECRET` (= Key Vault refs, all *Resolved*), `TABLES_ENDPOINT`, `SITE_BASE=https://www.itud.eu/gnca`, `CRED_TTL_DAYS=7` |
 | Telegram | bot `@gnca_cartoni_bot` (since 2026-11-11; before: `@cacartony_bot`, webhook removed). Webhook → `/api/telegram` with secret token, `allowed_updates=[message, callback_query]`; command menu set (it + default) |
-
-Verified: `/api/health` 200; forged webhook call 403; simulated `/citta mi arese` update → stores
-fetched and row written to the table (test row removed); site client read-only tests pass.
 
 ### Deploy / operate
 ```bash
@@ -265,13 +274,19 @@ az functionapp scale config set -g rg-bot-colletta -n func-bot-colletta-bfdc1a -
 Checked after the change: `/api/health` 200, webhook without secret 403. A full Telegram conversation at 512 MB
 was not tried yet.
 
-### Next steps
-1. ~~Deploy~~ done 2026-11-10 (zip deploy + `setMyCommands` for default and `it`).
-2. ~~Try truck loading on the live site~~ done 2026-11-10 with `site_client` (not through the Telegram chat).
-3. Owner should **rotate the bot token** via @BotFather `/revoke` (it was pasted in a chat transcript)
-   and update Key Vault (see above).
-4. Try "Registra comunque" once on the live site (the `MediConfermati` re-submit is untested).
-5. Optional: the other Utility functions (edit carton, totals, downloads).
+### Open items
+0. **WhatsApp go-live.** Code deployed, nothing configured: `/api/whatsapp` answers 403 until the settings exist.
+   Missing: Key Vault secrets `wa-app-secret` (Meta app secret), `wa-verify-token` (any random string),
+   `wa-token` (access token) and app settings `WA_APP_SECRET`, `WA_VERIFY_TOKEN`, `WA_TOKEN` (Key Vault refs) plus
+   `WA_PHONE_ID`; then register the webhook in the Meta app (callback `https://func-bot-colletta-bfdc1a.azurewebsites.net/api/whatsapp`,
+   field `messages`) and try a whole conversation. The app secret was pasted in a chat transcript: reset it in the
+   Meta dashboard once everything works.
+1. Owner should **revoke the old bot token** via @BotFather `/revoke` (it was pasted in a chat transcript); if it
+   is the token in use, update Key Vault as described above.
+2. Never tried on the live site: "Registra comunque" (the `MediConfermati` re-submit), `/modifica`
+   (`PVModificaPacco`), a partial truck load, weights outside 1-22 kg (§2.4, §2.5).
+3. A full Telegram conversation at 512 MB instance memory.
+4. Optional: the other Utility functions (totals, downloads).
 
 ---
 
