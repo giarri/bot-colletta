@@ -129,6 +129,7 @@ class World:
         self.edit_error = None
         self.add_error = None
         self.closed = False
+        self.reopen_error = None
         self.sessions = 0
         self.tg = []           # (method, payload)
 
@@ -177,6 +178,12 @@ def w(monkeypatch):
 
         def closed(self):
             return world.closed
+
+        def reopen(self):
+            world.calls.append(("reopen",))
+            if world.reopen_error:
+                raise world.reopen_error
+            world.closed, world.cats = False, list(CATS)
 
         def next_number(self):
             return "6"
@@ -280,6 +287,22 @@ def test_cartone_closed_or_unreadable_points_to_the_site(w):
     say("/cartone")  # the store declared the collection finished
     text = w.last()["text"]
     assert "terminata" in text and "https://www.itud.eu/gnca/mi/arese/" in text and "Non riesco" not in text
+    assert w.datas() == ["open:go", "open:x"]
+
+
+def test_reopen_closed_collection(w):
+    w.cats, w.closed = [], True
+    say("/cartone")
+    tap("open:x")
+    assert w.edits()[-1]["text"] == bot.CANCELLED and ("reopen",) not in w.calls
+    w.reopen_error = bot.site.SiteError("boom")
+    tap("open:go")  # the site did not reopen: link to the site, nothing else
+    text = w.last()["text"]
+    assert "Non sono riuscito a riaprire" in text and "https://www.itud.eu/gnca/mi/arese/" in text and w.closed
+    w.reopen_error = None
+    tap("open:go")
+    assert not w.closed and "riaperta" in w.edits()[-1]["text"]
+    assert "Cosa contiene?" in w.last()["text"] and w.datas()[0] == "cat:18"  # straight on to the new carton
 
 
 def test_crash_message_points_to_the_site(w):

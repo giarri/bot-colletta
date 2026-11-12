@@ -94,7 +94,8 @@ STALE_EDIT = "Questo pulsante non è più valido. Scrivi /modifica per ricominci
 STALE_TRUCK = "Questo pulsante non è più valido. Scrivi /camion per ricominciare."
 SEND_FAILED = "⚠️ Non sono riuscito a mostrarti la risposta. Riprova, oppure scrivi /annulla e ricomincia."
 CLOSED = ("🔒 La colletta di questo punto vendita è stata dichiarata <b>terminata</b>: non si possono registrare nuovi cartoni.\n"
-          "Per riaprirla, apri il sito e tocca «aprila»:\n")
+          "Se è stato un errore, tocca «Riapri la colletta» qui sotto, oppure fallo dal sito:\n")
+REOPEN_BUTTONS = [[("🔓 Riapri la colletta", "open:go")], [(CANCEL, "open:x")]]
 LOST_TRUCK = "Non trovo più i cartoni da caricare. Scrivi /camion per ricominciare."  # typed text, no button involved
 
 # Emoji for a category, chosen by keyword at the start of a word of its label (first match wins).
@@ -518,9 +519,33 @@ def receive_code(chat_id: int, row: dict, msg: dict) -> None:
     _save(row)
     _menu(chat_id, True)
     n = len(sess.cartons())
+    closed = sess.closed()
     send(chat_id, f"✅ Codice di accesso corretto: <b>{esc(sess.title())}</b>\n"
                   f"Cartoni già registrati: {n}\n\n"
-                  + (CLOSED + _site_link(row) if sess.closed() else "Scrivi /cartone per registrare un cartone."))
+                  + (CLOSED + _site_link(row) if closed else "Scrivi /cartone per registrare un cartone."),
+         REOPEN_BUTTONS if closed else None)
+
+
+def _reopen(chat_id: int, row: dict, message_id: int) -> None:
+    """Button «Riapri la colletta»: undo "colletta terminata" on the site, then go on with the new carton."""
+    if not _logged(row):
+        _open_session(chat_id, row)  # asks for what is missing
+        return
+    sess = _open_session(chat_id, row)
+    if not sess:
+        return
+    if not _claim(row):
+        return  # a double tap: the other update is already reopening and will answer
+    try:
+        sess.reopen()
+    except (site.SiteError, requests.RequestException) as e:
+        logging.exception("reopen failed")
+        send(chat_id, f"⚠️ Non sono riuscito a riaprire la colletta. Puoi farlo dal sito:\n{_site_link(row)}\n"
+                      f"<i>{esc(str(e)[:300])}</i>")
+        return
+    edit(chat_id, message_id, "🔓 Colletta riaperta.")
+    cmd_cartone(chat_id, row)
+
 
 
 def _save_kg_limits(row: dict, sess: site.StoreSession) -> None:
@@ -535,7 +560,7 @@ def cmd_cartone(chat_id: int, row: dict) -> None:
     cats = sess.categories()
     if not cats:
         if sess.closed():
-            send(chat_id, CLOSED + _site_link(row))
+            send(chat_id, CLOSED + _site_link(row), REOPEN_BUTTONS)
         else:
             send(chat_id, "⚠️ Non riesco a leggere dal sito l'elenco dei contenuti. Controlla direttamente sul sito:\n" + _site_link(row))
         return
@@ -598,7 +623,7 @@ def _submit_carton(chat_id: int, row: dict, kg: Decimal, confirm: bool = False) 
                       f"oppure guarda sul sito:\n{_site_link(row)}\n<i>{esc(str(e)[:300])}</i>")
         return
     send(chat_id, f"✅ Cartone n. <b>{esc(c.number)}</b> registrato: {_cat_show(c.content)}, {esc(c.kg)} kg (ore {esc(c.done)})\n"
-                  "Scrivi /cartone per il prossimo, /lista per vederli tutti.")
+                  "Scrivi /cartone per il prossimo, /lista per elencarli, o /modifica un cartone creato.")
 
 
 # ---------------- edit a carton (site's Utility tab) ----------------
@@ -1041,6 +1066,11 @@ def handle_callback(cq: dict) -> None:
             return
         edit(chat_id, msg["message_id"], f"⚖️ Peso confermato: <b>{_num(kg)} kg</b>")
         _submit_carton(chat_id, row, kg, confirm=True)
+    elif kind == "open":
+        if value == "go":
+            _reopen(chat_id, row, msg["message_id"])
+        else:
+            edit(chat_id, msg["message_id"], CANCELLED)
     elif kind in ("ed", "ec", "ek"):
         edit_callback(chat_id, row, msg["message_id"], kind, value)
     elif kind == "trk":

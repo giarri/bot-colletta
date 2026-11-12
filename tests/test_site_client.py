@@ -105,6 +105,17 @@ def test_login_and_store_page(site, session):
 		    <input type="submit" value=" aprila."><input type="hidden" value="PVTerminata" name="NextStep"></p></div></form>
 		<table><tbody></tbody></table>"""
     assert session.closed() and session.categories() == [] and session.next_number() is None
+    closed_page, n = session.page, len(site.posts)
+    site.pages["PVTerminata"] = STORE
+    session.reopen()
+    assert site.posts[n:] == [{"NextStep": "PVTerminata"}] and not session.closed()
+    session.reopen()  # already open: PVTerminata would close it, so nothing is posted
+    assert len(site.posts) == n + 1
+    session.page = closed_page
+    site.pages.update(PVTerminata=closed_page, PVListAll=closed_page)  # the site did not reopen it
+    with pytest.raises(sc.SiteError):
+        session.reopen()
+    site.pages["PVListAll"] = STORE
     site.pages["Login"] = LOGIN  # bounced back to the login page
     with pytest.raises(sc.LoginFailed):
         sc.StoreSession("mi", "arese", "954", "wrong")

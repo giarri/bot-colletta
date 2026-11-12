@@ -97,8 +97,13 @@ Decimal separator shown on the page is a comma (`12,00`); `kili` is sent with a 
   (Varie 1,50 kg) saved nothing.
 - **Not verified yet**: the `MediConfermati` override (used by the bot's "Registra comunque"), weights outside
   1–22, which cartons a partial truck load takes.
-- **Never touch `PVTerminata`** ("dichiarare terminata la colletta", with `NrVolontari`): it appears on the
-  Utility page when nothing is pending and closes the store's drive. The bot does not implement it.
+- **`PVTerminata` is a toggle.** On the Utility page ("dichiarare terminata la colletta", with `NrVolontari`,
+  shown when nothing is pending) it **closes** the store's drive: never post it from there, the bot does not
+  implement closing. Once closed, the store page has no new-carton form but a banner "Hai dichiarato terminata
+  la colletta. Per poter inserire nuovi cartoni [aprila.]" whose button posts `NextStep=PVTerminata` alone
+  and reopens it (seen on 2026-11-12 on mi/rho LIDL). The bot's «Riapri la colletta» button
+  (`StoreSession.reopen`) posts it only while that banner is on the page. **Not verified yet**: the reopen
+  response; the bot checks the store page afterwards.
 - No brute-forcing or trying the test code on other stores.
 
 ### 2.5 Utility page — `POST NextStep=PVUtility` (fixture `tests/fixtures/utility.html`)

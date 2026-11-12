@@ -195,8 +195,24 @@ class StoreSession:
 
     def closed(self) -> bool:
         """True when the store declared its collection finished ("Hai dichiarato terminata la colletta"): the store
-        page then has no new-carton form. Only the site can reopen it (NextStep=PVTerminata): the bot never does."""
+        page then has no new-carton form, only the "aprila" button (NextStep=PVTerminata)."""
         return bool(CLOSED_RE.search(_text(self.page)))
+
+    def reopen(self) -> None:
+        """Press the banner's "aprila" button. Call it right after the login (it reads the store page).
+
+        PVTerminata is also the action that *closes* the collection (from the Utility page), so it is posted only
+        while the "terminata" banner is on the page. The response format is unknown: verified on the store page.
+        """
+        if not self.closed():
+            if self.categories():
+                return  # already open (e.g. reopened by another volunteer)
+            raise SiteError("non trovo sul sito il pulsante per riaprire la colletta")
+        self._post(NextStep="PVTerminata")
+        if self.closed() or not self.categories():
+            self._post(NextStep="PVListAll")
+        if self.closed() or not self.categories():
+            raise SiteError("la colletta risulta ancora terminata dopo l'invio: " + _text(self.page)[:300])
 
     def next_number(self) -> str | None:
         value = _inputs(self.page).get("NumeroPrevisto", {}).get("value", "").strip()
