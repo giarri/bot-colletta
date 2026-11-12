@@ -128,7 +128,16 @@ followed by a table Nr / Prodotto / Kg. of the pending cartons grouped by produc
 2026-11-11): the `PVModificaPacco` answer, and whether it applies the per-category weight limits (the client
 treats a "limiti previsti" answer as `WeightRejected`; there is no "confirm anyway" for edits).
 Bot flow: `/modifica` → carton buttons (`ed:<id>`) → content buttons (`ec:<cat>`, first one keeps the current
-content) → weight typed in `await_edit_kg` or "keep" button (`ek:same`) → submit (no extra confirmation).
+content) → weight typed in `await_edit_kg`, "keep" button (`ek:same`) or quick weight (`ek:<kg>`) → submit (no
+extra confirmation).
+
+**Weight question (new carton and edit).** Telegram cannot open a numeric keyboard for a typed answer, so the
+question (`_ask_kg`) offers the quick weights `KG_QUICK` (`kg:<kg>:<cat>` / `ek:<kg>`) and is sent with a
+`ForceReply` (keyboard open, placeholder `KG_PLACEHOLDER`). A message has one markup only: the buttons sit on the
+edited "📦 Contenuto" message, the ForceReply on the question below it. `pending_msg` is that message, so that a
+typed weight removes its buttons. No ForceReply in groups (it would open the reply for every member; a selective
+one needs a message of the user to reply to, and a tapped button has none). WhatsApp: no ForceReply, the quick
+weights are a list on the question. A quick weight goes through the same limits check as a typed one.
 
 Also on the page, **not used by the bot**: `PVListTot` (totals), `PVDwl` / `PVDwlProspetto` (downloads).
 

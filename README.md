@@ -14,8 +14,11 @@ Bot   📦 Cartone n. 4
       [🐟 Tonno in scatola] [☕ Colazione e merenda]
       [🫙 Passata e sughi]  [🍝 Pasta]  …
 You   (tap 🍝 Pasta)
-Bot   Quanti kg pesa?
-You   12
+Bot   📦 Contenuto: 🍝 Pasta
+      [10 kg] [12 kg] [15 kg] [20 kg]
+      [❌ Annulla]
+Bot   Quanti kg pesa? Scrivi il numero oppure tocca un pulsante qui sopra.
+You   12,5
 Bot   ✅ Cartone n. 4 registrato: 🍝 Pasta, 12,00 kg (ore 17:50)
 ```
 
@@ -23,7 +26,7 @@ Bot   ✅ Cartone n. 4 registrato: 🍝 Pasta, 12,00 kg (ore 17:50)
 
 | Command | What happens |
 |---|---|
-| `/cartone` | Register a carton: pick the content, type the weight. |
+| `/cartone` | Register a carton: pick the content, type the weight (or tap one of the quick weights). |
 | `/lista` | See every carton registered for the store, with totals. |
 | `/modifica` | Fix the content or weight of a carton not yet shipped. |
 | `/camion` | Load the pending cartons on the truck, behind an explicit confirmation. |
