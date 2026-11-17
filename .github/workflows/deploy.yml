@@ -1,6 +1,6 @@
 name: Deploy
 
-# Tests, then provisions the infrastructure (Terraform) and deploys the app to Azure. Runs on every push to main.
+# Tests, then deploys the app to Azure on every push to main. Terraform only applies when infra/ changed (or on a manual run).
 on:
   push:
     branches: [main]
@@ -31,6 +31,12 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            infra:
+              - 'infra/**'
       - uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -42,14 +48,19 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
 
-      - name: Provision infrastructure
+      - name: Initialise Terraform
         id: infra
         working-directory: infra
         run: |
           terraform init -input=false -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE }}"
-          terraform apply -input=false -auto-approve -var="resource_group_name=$AZURE_RESOURCE_GROUP"
           echo "functionapp=$(terraform output -raw function_app_name)" >> "$GITHUB_OUTPUT"
           echo "vault=$(terraform output -raw key_vault_name)" >> "$GITHUB_OUTPUT"
+
+      # Only touch Azure resources when the infrastructure code changed (or on a manual run).
+      - name: Provision infrastructure
+        if: steps.changes.outputs.infra == 'true' || github.event_name == 'workflow_dispatch'
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve -var="resource_group_name=$AZURE_RESOURCE_GROUP"
 
       - name: Read the Telegram token for the command menu
         run: |
