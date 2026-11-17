@@ -2,6 +2,7 @@
 
 **A Telegram bot that lets food-drive volunteers register donated cartons from their phone, in two taps.**
 available [https://t.me/gnca_cartoni_bot](https://t.me/gnca_cartoni_bot)
+whatsapp - WIP
 
 During the **Colletta Alimentare** (Italy's national food drive),
 volunteers in each supermarket weigh every carton of donated food and record it in a web app. The web app is
