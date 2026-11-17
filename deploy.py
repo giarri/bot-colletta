@@ -2,7 +2,7 @@
 """One-command deploy:  python3 deploy.py
 
 1. zips the app (every *.py in this folder except this script, plus host.json and requirements.txt)
-2. zip-deploys it to the Function App (remote build)
+2. zip-deploys it to the Function App (remote build); `az`'s own health check is advisory
 3. checks /api/health
 4. updates the Telegram command menu from bot.COMMANDS (needs TELEGRAM_TOKEN in .env or the environment; skipped otherwise)
 
@@ -37,8 +37,12 @@ def main() -> None:
     print("zipped:", ", ".join(files))
 
     # relative --src on purpose: `az` may be the Windows CLI, which can't read /mnt/... paths
-    subprocess.run(["az", "functionapp", "deployment", "source", "config-zip", "-g", RG, "-n", APP,
-                    "--src", ZIP, "--build-remote", "true"], cwd=HERE, check=True)
+    # `az` runs its own health check afterwards and exits 1 on a false negative (the app serves fine), so a failure
+    # here is only a warning: the /api/health loop below decides whether the deploy worked
+    r = subprocess.run(["az", "functionapp", "deployment", "source", "config-zip", "-g", RG, "-n", APP,
+                        "--src", ZIP, "--build-remote", "true"], cwd=HERE)
+    if r.returncode:
+        print(f"az exited {r.returncode}: checking /api/health to see whether the deploy worked")
 
     for attempt in range(6):  # the app may answer 5xx for a while right after a deploy
         try:
