@@ -29,7 +29,7 @@ fed github-production "$prefix:environment:production"
 fed github-pr "$prefix:pull_request"
 
 scope="/subscriptions/$sub/resourceGroups/$rg"
-# Contributor deploys the template and the app; RBAC Administrator lets the template create role assignments.
+# Contributor deploys the infrastructure and the app; RBAC Administrator lets Terraform create role assignments.
 for role in Contributor "Role Based Access Control Administrator"; do
   az role assignment create --assignee-object-id "$sp" --assignee-principal-type ServicePrincipal \
     --role "$role" --scope "$scope" >/dev/null
@@ -40,5 +40,6 @@ Set these repository variables (Settings > Secrets and variables > Actions > Var
   AZURE_CLIENT_ID=$app
   AZURE_TENANT_ID=$tenant
   AZURE_SUBSCRIPTION_ID=$sub
-Service principal object id (pass as deployerPrincipalId in infra/main.bicepparam): $sp
+Service principal object id (default of deployer_principal_id in infra/variables.tf; also
+CI_PRINCIPAL_ID for scripts/bootstrap-tfstate.sh): $sp
 OUT

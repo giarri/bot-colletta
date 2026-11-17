@@ -1,0 +1,31 @@
+name: Infra plan
+
+# Shows what a pull request would change in Azure. Skipped for forks, which get no OIDC token.
+on:
+  pull_request:
+    paths: [infra/**, .github/workflows/infra-plan.yml]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  plan:
+    if: github.event.pull_request.head.repo.full_name == github.repository && vars.AZURE_CLIENT_ID != '' && vars.TF_STATE_STORAGE != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Plan
+        working-directory: infra
+        run: |
+          terraform init -input=false -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE }}"
+          terraform plan -input=false -lock=false -var="resource_group_name=${{ vars.AZURE_RESOURCE_GROUP || 'rg-bot-colletta' }}"
