@@ -5,9 +5,9 @@ variable "resource_group_name" {
 }
 
 variable "location" {
-  description = "Azure region. Must match the existing resources: changing it replaces them. westeurope rejects NEW resources on the owner subscription, so a fresh deployment needs another region (e.g. italynorth)."
+  description = "Azure region of the resources. Changing it replaces them. The resource group itself is in westeurope, which rejects new resources on the owner subscription."
   type        = string
-  default     = "westeurope"
+  default     = "italynorth"
 }
 
 variable "app_name" {
@@ -25,6 +25,12 @@ variable "name_suffix" {
     condition     = can(regex("^[a-z0-9]{3,8}$", var.name_suffix))
     error_message = "name_suffix must be 3-8 lowercase letters or digits."
   }
+}
+
+variable "service_plan_name" {
+  description = "Name of the Flex Consumption plan. The app already runs on the hand-made one; an app cannot be moved to another plan."
+  type        = string
+  default     = "ASP-rgbotcolletta-fffb"
 }
 
 variable "site_base" {

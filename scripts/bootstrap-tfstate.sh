@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time: create the storage account that holds the Terraform state, and let the CI principal use it.
-# Usage: scripts/bootstrap-tfstate.sh [resource-group] [location]   (location defaults to the resource group's)
+# Usage: scripts/bootstrap-tfstate.sh [resource-group] [location]   (location defaults to italynorth: the resource group's own region rejects new resources)
 # Needs `az login` as someone who can create storage accounts and assign roles on the resource group.
 # Prints the storage account name to put in the TF_STATE_STORAGE repository variable.
 set -euo pipefail
@@ -11,12 +11,8 @@ sub=$(az account show --query id -o tsv)
 me=$(az ad signed-in-user show --query id -o tsv)
 sa="sttfstate$(printf %s "$sub" | sha256sum | cut -c1-8)"
 
-if az group show -n "$rg" >/dev/null 2>&1; then
-  location="${location:-$(az group show -n "$rg" --query location -o tsv)}"
-else
-  location="${location:-italynorth}"
-  az group create -n "$rg" -l "$location" --output none
-fi
+location="${location:-italynorth}"
+az group show -n "$rg" >/dev/null 2>&1 || az group create -n "$rg" -l "$location" --output none
 az storage account show -g "$rg" -n "$sa" --query id -o tsv >/dev/null 2>&1 ||
   az storage account create -g "$rg" -n "$sa" -l "$location" --sku Standard_LRS --min-tls-version TLS1_2 \
     --allow-blob-public-access false --allow-shared-key-access false --output none

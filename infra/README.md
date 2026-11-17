@@ -5,9 +5,8 @@ Everything the bot runs on, as code: Function App (Flex Consumption, Python 3.11
 the role assignments that tie them together via managed identity. No shared keys, no secrets in the code.
 
 The resource group `rg-bot-colletta` is not managed here; it must exist (`scripts/bootstrap-tfstate.sh` creates it if missing).
-The default `location` is `westeurope`, where the existing resources live. If Azure rejects new resources there (as it
-does on the owner subscription), pass another region to the bootstrap script for the state account, e.g.
-`scripts/bootstrap-tfstate.sh rg-bot-colletta italynorth`; the app resources stay put because they are imported.
+The resources live in `italynorth`; the resource group itself is in `westeurope`, which rejects new resources on the
+owner subscription, so the bootstrap script puts the state account in `italynorth` too.
 State lives in an Azure Storage container (`tfstate`), accessed with Entra ID only.
 
 ## First-time setup
@@ -47,9 +46,13 @@ terraform import azurerm_log_analytics_workspace.logs   $base/Microsoft.Operatio
 terraform import azurerm_application_insights.insights  $base/Microsoft.Insights/components/func-bot-colletta-$s
 terraform import azurerm_storage_account.storage        $base/Microsoft.Storage/storageAccounts/stbotcolletta$s
 terraform import azurerm_key_vault.vault                $base/Microsoft.KeyVault/vaults/kv-botcolletta-$s
-terraform import azurerm_service_plan.plan              $base/Microsoft.Web/serverfarms/plan-bot-colletta-$s
+terraform import azurerm_service_plan.plan              $base/Microsoft.Web/serverfarms/ASP-rgbotcolletta-fffb
 terraform import azurerm_function_app_flex_consumption.app $base/Microsoft.Web/sites/func-bot-colletta-$s
 ```
+
+The Key Vault keeps its 7-day soft-delete retention and the app stays on its hand-made plan `ASP-rgbotcolletta-fffb`;
+neither can be changed in place. A leftover empty plan `plan-bot-colletta-bfdc1a` from a failed Bicep run can be
+deleted.
 
 Anything that does not exist yet (container, table, role assignments) is simply created. If the plan wants to replace
 something, deploy to a fresh resource group with another `name_suffix` first and switch the webhook over.

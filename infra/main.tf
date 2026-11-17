@@ -90,13 +90,13 @@ resource "azurerm_key_vault" "vault" {
   tenant_id                  = data.azurerm_client_config.current.tenant_id
   sku_name                   = "standard"
   rbac_authorization_enabled = true
-  soft_delete_retention_days = 90
+  soft_delete_retention_days = 7 # cannot be changed once set (forces a new vault)
 }
 
 # ---------- Function App on Flex Consumption ----------
 
 resource "azurerm_service_plan" "plan" {
-  name                = "plan-${var.app_name}-${var.name_suffix}"
+  name                = var.service_plan_name
   location            = var.location
   resource_group_name = data.azurerm_resource_group.rg.name
   os_type             = "Linux"
