@@ -4,13 +4,16 @@
 1. zips the app (every *.py in this folder except this script, plus host.json and requirements.txt)
 2. zip-deploys it to the Function App (remote build)
 3. checks /api/health
-4. updates the Telegram command menu from bot.COMMANDS (needs TELEGRAM_TOKEN in .env; skipped otherwise)
+4. updates the Telegram command menu from bot.COMMANDS (needs TELEGRAM_TOKEN in .env or the environment; skipped otherwise)
+
+AZURE_RESOURCE_GROUP and AZURE_FUNCTIONAPP override the target (the GitHub Actions deploy workflow sets them).
 
 Only needs Python 3 and the Azure CLI (`az login` done). Run it from this folder.
 """
 
 import ast
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -20,7 +23,8 @@ import urllib.error
 import urllib.request
 import zipfile
 
-RG, APP = "rg-bot-colletta", "func-bot-colletta-bfdc1a"
+RG = os.environ.get("AZURE_RESOURCE_GROUP", "rg-bot-colletta")
+APP = os.environ.get("AZURE_FUNCTIONAPP", "func-bot-colletta-bfdc1a")
 HERE = pathlib.Path(__file__).resolve().parent
 ZIP = "app.zip"
 
@@ -50,7 +54,7 @@ def main() -> None:
     env = {k.strip(): v.strip().strip("\"'") for k, v in
            (line.split("=", 1) for line in (HERE / ".env").read_text().splitlines()
             if "=" in line and not line.lstrip().startswith("#"))} if (HERE / ".env").exists() else {}
-    token = env.get("TELEGRAM_TOKEN")
+    token = os.environ.get("TELEGRAM_TOKEN") or env.get("TELEGRAM_TOKEN")  # CI passes it in the environment
     if not token:
         print("no TELEGRAM_TOKEN in .env: command menu not updated")
         return
