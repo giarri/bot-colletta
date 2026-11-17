@@ -1,0 +1,54 @@
+name: Deploy
+
+# Tests, then provisions the infrastructure (Bicep) and deploys the app to Azure. Runs on every push to main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-bot-colletta' }}
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Provision infrastructure
+        id: infra
+        run: |
+          az deployment group create -g "$AZURE_RESOURCE_GROUP" \
+            -f infra/main.bicep -p infra/main.bicepparam \
+            --query 'properties.outputs' -o json | tee outputs.json
+          echo "functionapp=$(jq -r .functionAppName.value outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "vault=$(jq -r .keyVaultName.value outputs.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Read the Telegram token for the command menu
+        run: |
+          token=$(az keyvault secret show --vault-name "${{ steps.infra.outputs.vault }}" -n telegram-token --query value -o tsv)
+          echo "::add-mask::$token"
+          echo "TELEGRAM_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Deploy the app, check health, update the command menu
+        env:
+          AZURE_FUNCTIONAPP: ${{ steps.infra.outputs.functionapp }}
+        run: python3 deploy.py

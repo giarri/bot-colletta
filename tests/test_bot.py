@@ -949,7 +949,7 @@ def test_whatsapp_carton_flow(wa):
     wa_say("12,5")
     assert w.added == [("25", 12.5, False)] and not w.tg  # nothing goes to Telegram
     done = w.wa[-1]
-    assert done["interactive"]["type"] == "button" and wa_ids(done) == ["cmd:cartone", "cmd:lista"]
+    assert done["interactive"]["type"] == "button" and wa_ids(done) == ["cmd:cartone", "cmd:lista", "cmd:modifica"]
     w.wa.clear()
     wa_tap("cmd:lista", "button_reply")  # a command button works like the typed command
     assert "Arese/CONAD" in wa_body(w.wa[-1]) and "```" in wa_body(w.wa[-1])
