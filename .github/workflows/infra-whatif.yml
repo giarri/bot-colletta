@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   whatif:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.repo.full_name == github.repository && vars.AZURE_CLIENT_ID != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

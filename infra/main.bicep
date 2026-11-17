@@ -11,6 +11,8 @@ param location string = 'italynorth'
 param appName string = 'bot-colletta'
 
 @description('Suffix that keeps global names unique. Pass bfdc1a to line up with the resources created by hand.')
+@minLength(3)
+@maxLength(8)
 param nameSuffix string = take(uniqueString(resourceGroup().id), 6)
 
 @description('Base URL of the food-drive web app.')
@@ -161,7 +163,6 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
     siteConfig: {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      appSettings: [for s in items(union(baseSettings, whatsappSettings)): { name: s.key, value: s.value }]
     }
     functionAppConfig: {
       deployment: {
@@ -179,6 +180,13 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
     }
   }
   dependsOn: [packageContainer, usersTable]
+}
+
+// Separate resource: the values include runtime properties, which a for-loop in siteConfig cannot use.
+resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: union(baseSettings, whatsappSettings)
 }
 
 // ---------- Role assignments ----------
