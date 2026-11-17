@@ -1,6 +1,6 @@
 name: Deploy
 
-# Tests, then provisions the infrastructure (Bicep) and deploys the app to Azure. Runs on every push to main.
+# Tests, then provisions the infrastructure (Terraform) and deploys the app to Azure. Runs on every push to main.
 on:
   push:
     branches: [main]
@@ -16,6 +16,10 @@ concurrency:
 
 env:
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-bot-colletta' }}
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   ci:
@@ -33,14 +37,19 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
       - name: Provision infrastructure
         id: infra
+        working-directory: infra
         run: |
-          az deployment group create -g "$AZURE_RESOURCE_GROUP" \
-            -f infra/main.bicep -p infra/main.bicepparam \
-            --query 'properties.outputs' -o json | tee outputs.json
-          echo "functionapp=$(jq -r .functionAppName.value outputs.json)" >> "$GITHUB_OUTPUT"
-          echo "vault=$(jq -r .keyVaultName.value outputs.json)" >> "$GITHUB_OUTPUT"
+          terraform init -input=false -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE }}"
+          terraform apply -input=false -auto-approve -var="resource_group_name=$AZURE_RESOURCE_GROUP"
+          echo "functionapp=$(terraform output -raw function_app_name)" >> "$GITHUB_OUTPUT"
+          echo "vault=$(terraform output -raw key_vault_name)" >> "$GITHUB_OUTPUT"
 
       - name: Read the Telegram token for the command menu
         run: |

@@ -28,15 +28,19 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-  bicep:
+  terraform:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint and build the template
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Format and validate
+        working-directory: infra
         run: |
-          az bicep install
-          az bicep lint --file infra/main.bicep
-          az bicep build-params --file infra/main.bicepparam --stdout > /dev/null
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate
 
   shell:
     runs-on: ubuntu-latest

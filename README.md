@@ -83,12 +83,12 @@ python3 -m venv .venv && .venv/bin/pip install pytest requests
 
 ## CI/CD and infrastructure as code
 
-- **CI** (`.github/workflows/ci.yml`): pytest, Bicep lint/build and ShellCheck on every PR and push.
-- **Deploy** (`.github/workflows/deploy.yml`): on push to `main`, after CI: provisions the infrastructure with Bicep,
+- **CI** (`.github/workflows/ci.yml`): pytest, Terraform fmt/validate and ShellCheck on every PR and push.
+- **Deploy** (`.github/workflows/deploy.yml`): on push to `main`, after CI: provisions the infrastructure with Terraform,
   zip-deploys the app, checks `/api/health` and refreshes the Telegram command menu. Logs in to Azure with GitHub
   OIDC, no stored credentials. The `production` environment can require a manual approval.
-- **What-if** (`.github/workflows/infra-whatif.yml`): shows the Azure changes a PR to `infra/` would make.
-- **IaC** (`infra/main.bicep`): Function App (Flex Consumption), storage, Key Vault, App Insights and the managed
+- **Plan** (`.github/workflows/infra-plan.yml`): shows the Azure changes a PR to `infra/` would make.
+- **IaC** (`infra/*.tf`): Function App (Flex Consumption), storage, Key Vault, App Insights and the managed
   identity role assignments. Setup steps are in [`infra/README.md`](infra/README.md).
 
 ## More
