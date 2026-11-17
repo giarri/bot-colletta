@@ -1,7 +1,7 @@
 # Infrastructure (Terraform)
 
 Everything the bot runs on, as code: Function App (Flex Consumption, Python 3.11, 512 MB), storage account
-(Functions host, deployment package, table `botusers`), Key Vault (RBAC), Log Analytics + Application Insights, and
+(Functions host, deployment package; the app creates the `botusers` table itself), Key Vault (RBAC), Log Analytics + Application Insights, and
 the role assignments that tie them together via managed identity. No shared keys, no secrets in the code.
 
 The resource group `rg-bot-colletta` is not managed here; it must exist (`scripts/bootstrap-tfstate.sh` creates it if missing).

@@ -1,4 +1,4 @@
-# bot-colletta infrastructure: Function App (Flex Consumption), Table Storage, Key Vault, Application Insights.
+# bot-colletta infrastructure: Function App (Flex Consumption), Table Storage (created by the app), Key Vault, Application Insights.
 # Secret VALUES are never managed here: seed them with scripts/seed-secrets.sh (see README.md).
 
 data "azurerm_resource_group" "rg" {
@@ -12,7 +12,6 @@ locals {
   storage_name         = lower("st${replace(var.app_name, "-", "")}${var.name_suffix}")
   key_vault_name       = "kv-${replace(var.app_name, "-", "")}-${var.name_suffix}"
   deployment_container = "app-package"
-  table_name           = "botusers"
 
   secret_ref = { for s in ["telegram-token", "cred-key", "webhook-secret", "wa-app-secret", "wa-verify-token", "wa-token"] :
     s => "@Microsoft.KeyVault(SecretUri=https://${local.key_vault_name}.vault.azure.net/secrets/${s}/)"
@@ -55,7 +54,7 @@ resource "azurerm_application_insights" "insights" {
   workspace_id        = azurerm_log_analytics_workspace.logs.id
 }
 
-# ---------- Storage: Functions host + deployment package + the botusers table ----------
+# ---------- Storage: Functions host + deployment package ----------
 
 resource "azurerm_storage_account" "storage" {
   name                            = local.storage_name
@@ -76,10 +75,8 @@ resource "azurerm_storage_container" "package" {
   container_access_type = "private"
 }
 
-resource "azurerm_storage_table" "users" {
-  name               = local.table_name
-  storage_account_id = azurerm_storage_account.storage.id
-}
+# The botusers table is not managed here: the provider reads table ACLs over the data plane, which fails with shared
+# keys disabled. The app creates it on first use (user_store.py, create_table_if_not_exists).
 
 # ---------- Key Vault (RBAC mode; secrets are seeded out of band) ----------
 
@@ -129,8 +126,6 @@ resource "azurerm_function_app_flex_consumption" "app" {
   }
 
   app_settings = merge(local.base_settings, local.whatsapp_settings)
-
-  depends_on = [azurerm_storage_table.users]
 }
 
 # ---------- Role assignments ----------
